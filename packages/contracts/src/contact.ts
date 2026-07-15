@@ -14,6 +14,12 @@ export const MaxContactVerifyRequestSchema = z.strictObject({
 });
 export type MaxContactVerifyRequest = z.infer<typeof MaxContactVerifyRequestSchema>;
 
+export const VerifiedContactSnapshotSchema = z.strictObject({
+  phone: PhoneNumberSchema,
+  verifiedAt: IsoDateTimeSchema,
+});
+export type VerifiedContactSnapshot = z.infer<typeof VerifiedContactSnapshotSchema>;
+
 export const MaxContactVerifyResponseSchema = z.strictObject({
   phone: PhoneNumberSchema,
   verified: z.literal(true),

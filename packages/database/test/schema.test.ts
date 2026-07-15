@@ -66,6 +66,16 @@ describe('database schema', () => {
     expect(getTableConfig(integrationOutbox).foreignKeys).toHaveLength(1);
   });
 
+  it('persists a verified contact only as a consistent server session snapshot', () => {
+    const checks = getTableConfig(sessions).checks.map(({ name }) => name);
+
+    expect(sessions.verifiedPhone.notNull).toBe(false);
+    expect(sessions.phoneVerifiedAt.notNull).toBe(false);
+    expect(checks).toContain('sessions_verified_phone_format');
+    expect(checks).toContain('sessions_verified_contact_consistent');
+    expect(checks).toContain('sessions_phone_verification_within_lifetime');
+  });
+
   it('accepts either a city or a region while rejecting a missing location', () => {
     const checks = getTableConfig(submissions).checks.map(({ name }) => name);
 

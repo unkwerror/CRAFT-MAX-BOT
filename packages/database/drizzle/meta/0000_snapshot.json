@@ -1,5 +1,5 @@
 {
-  "id": "0f501ebf-86ef-4071-98d7-2a284e50dc83",
+  "id": "1e582b0f-3753-4a10-bd14-627eca082802",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -663,6 +663,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "verified_phone": {
+          "name": "verified_phone",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone_verified_at": {
+          "name": "phone_verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -736,6 +748,18 @@
         "sessions_revocation_after_creation": {
           "name": "sessions_revocation_after_creation",
           "value": "\"sessions\".\"revoked_at\" is null or \"sessions\".\"revoked_at\" >= \"sessions\".\"created_at\""
+        },
+        "sessions_verified_phone_format": {
+          "name": "sessions_verified_phone_format",
+          "value": "\"sessions\".\"verified_phone\" is null or \"sessions\".\"verified_phone\" ~ '^\\+[1-9][0-9]{7,14}$'"
+        },
+        "sessions_verified_contact_consistent": {
+          "name": "sessions_verified_contact_consistent",
+          "value": "(\"sessions\".\"verified_phone\" is null and \"sessions\".\"phone_verified_at\" is null)\n        or (\"sessions\".\"verified_phone\" is not null and \"sessions\".\"phone_verified_at\" is not null)"
+        },
+        "sessions_phone_verification_within_lifetime": {
+          "name": "sessions_phone_verification_within_lifetime",
+          "value": "\"sessions\".\"phone_verified_at\" is null\n        or (\"sessions\".\"phone_verified_at\" >= \"sessions\".\"created_at\"\n          and \"sessions\".\"phone_verified_at\" < \"sessions\".\"expires_at\")"
         }
       },
       "isRLSEnabled": false

@@ -91,9 +91,17 @@ CREATE TABLE "sessions" (
 	"max_user_id" bigint NOT NULL,
 	"expires_at" timestamp with time zone NOT NULL,
 	"revoked_at" timestamp with time zone,
+	"verified_phone" varchar(16),
+	"phone_verified_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "sessions_expiry_after_creation" CHECK ("sessions"."expires_at" > "sessions"."created_at"),
-	CONSTRAINT "sessions_revocation_after_creation" CHECK ("sessions"."revoked_at" is null or "sessions"."revoked_at" >= "sessions"."created_at")
+	CONSTRAINT "sessions_revocation_after_creation" CHECK ("sessions"."revoked_at" is null or "sessions"."revoked_at" >= "sessions"."created_at"),
+	CONSTRAINT "sessions_verified_phone_format" CHECK ("sessions"."verified_phone" is null or "sessions"."verified_phone" ~ '^\+[1-9][0-9]{7,14}$'),
+	CONSTRAINT "sessions_verified_contact_consistent" CHECK (("sessions"."verified_phone" is null and "sessions"."phone_verified_at" is null)
+        or ("sessions"."verified_phone" is not null and "sessions"."phone_verified_at" is not null)),
+	CONSTRAINT "sessions_phone_verification_within_lifetime" CHECK ("sessions"."phone_verified_at" is null
+        or ("sessions"."phone_verified_at" >= "sessions"."created_at"
+          and "sessions"."phone_verified_at" < "sessions"."expires_at"))
 );
 --> statement-breakpoint
 CREATE TABLE "submissions" (

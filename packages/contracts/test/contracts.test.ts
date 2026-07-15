@@ -9,6 +9,7 @@ import {
   HealthLiveResponseSchema,
   HealthReadyResponseSchema,
   InnSchema,
+  LeadDraftFormStateSchema,
   LeadDraftUpsertRequestSchema,
   LeadFormDataSchema,
   MAX_UPLOAD_BYTES,
@@ -16,6 +17,7 @@ import {
   MaxAuthResponseSchema,
   MaxContactVerifyRequestSchema,
   MaxContactVerifyResponseSchema,
+  MaxSessionSnapshotSchema,
   Sha256Schema,
   StartParamSchema,
   SubmissionCreateRequestSchema,
@@ -131,7 +133,7 @@ describe('MAX authentication and contact verification', () => {
         languageCode: 'ru',
         photoUrl: null,
       },
-      session: { expiresAt: LATER },
+      session: { expiresAt: LATER, verifiedContact: null },
       startParam: 'new_project',
     };
 
@@ -158,6 +160,29 @@ describe('MAX authentication and contact verification', () => {
       MaxAuthResponseSchema.safeParse({
         ...response,
         user: { ...response.user, lastName: '' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('restores only a server-owned verified contact snapshot', () => {
+    expect(
+      MaxSessionSnapshotSchema.safeParse({
+        expiresAt: LATER,
+        verifiedContact: {
+          phone: '+79991234567',
+          verifiedAt: NOW,
+        },
+      }).success,
+    ).toBe(true);
+    expect(MaxSessionSnapshotSchema.safeParse({ expiresAt: LATER }).success).toBe(false);
+    expect(
+      MaxSessionSnapshotSchema.safeParse({
+        expiresAt: LATER,
+        verifiedContact: {
+          phone: '+79991234567',
+          verifiedAt: NOW,
+          verified: true,
+        },
       }).success,
     ).toBe(false);
   });
@@ -250,25 +275,56 @@ describe('catalog and lead draft', () => {
     expect(InnSchema.safeParse('0000000000').success).toBe(false);
   });
 
-  it('allows a strict partial draft', () => {
+  it('preserves bounded raw partial values for autosave', () => {
     expect(
       LeadDraftUpsertRequestSchema.safeParse({
-        currentStep: 4,
+        currentStep: 14,
         payload: {
           role: 'developer',
-          fullName: 'Иван Петров',
-          organization: 'ООО Девелопмент',
-          inn: null,
-          contact: { phone: '+79991234567' },
+          fullName: 'И',
+          organization: '',
+          inn: '7707',
+          location: {},
+          scope: { kind: 'portfolio', objectCount: '1' },
+          area: { status: 'known', squareMeters: '12,' },
+          desiredStart: { status: 'known', date: '2026-' },
+          links: ['https://'],
+          contact: { phone: '+7999', email: 'client@' },
+          consent: {},
         },
       }).success,
     ).toBe(true);
+    expect(
+      LeadDraftFormStateSchema.parse({
+        fullName: ' И',
+        contact: { phone: '+7 ' },
+      }),
+    ).toEqual({ fullName: ' И', contact: { phone: '+7 ' } });
     expect(
       LeadDraftUpsertRequestSchema.safeParse({
         currentStep: 4,
         payload: { role: 'developer', arbitrary: 'value' },
       }).success,
     ).toBe(false);
+    expect(
+      LeadDraftUpsertRequestSchema.safeParse({
+        currentStep: 14,
+        payload: { contact: { phone: '+7999', phoneVerified: true } },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('bounds raw draft strings and collections', () => {
+    expect(LeadDraftFormStateSchema.safeParse({ fullName: 'x'.repeat(201) }).success).toBe(false);
+    expect(
+      LeadDraftFormStateSchema.safeParse({ scope: { objectCount: '1'.repeat(17) } }).success,
+    ).toBe(false);
+    expect(
+      LeadDraftFormStateSchema.safeParse({ links: Array.from({ length: 11 }, () => '') }).success,
+    ).toBe(false);
+    expect(LeadDraftFormStateSchema.safeParse({ contact: { phone: '1'.repeat(33) } }).success).toBe(
+      false,
+    );
   });
 
   it('requires a complete submission form without duplicate selections', () => {
@@ -283,6 +339,13 @@ describe('catalog and lead draft', () => {
       LeadFormDataSchema.safeParse({
         ...validLead,
         location: {},
+      }).success,
+    ).toBe(false);
+    expect(
+      LeadFormDataSchema.safeParse({
+        ...validLead,
+        fullName: 'И',
+        contact: { phone: '+7999', email: 'client@' },
       }).success,
     ).toBe(false);
   });

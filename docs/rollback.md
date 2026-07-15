@@ -11,4 +11,6 @@ only the CRAFT72 MAX application and include:
 - removal of only this application's MAX webhook;
 - checks of `/health/live`, `/health/ready` and Mini App startup after rollback.
 
-Stage 1 performs no server mutation, so its rollback is a Git revert of repository-only changes.
+For a static Mini App rollback, select a previous directory under
+`/home/mun/apps/craft72-max-app/releases` and atomically repoint only the application's `current`
+symlink. Never delete or overwrite the shared `.env` during a release switch.

@@ -115,6 +115,8 @@ export const sessions = pgTable(
       }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    verifiedPhone: varchar('verified_phone', { length: 16 }),
+    phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -126,6 +128,21 @@ export const sessions = pgTable(
     check(
       'sessions_revocation_after_creation',
       sql`${table.revokedAt} is null or ${table.revokedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      'sessions_verified_phone_format',
+      sql`${table.verifiedPhone} is null or ${table.verifiedPhone} ~ '^\\+[1-9][0-9]{7,14}$'`,
+    ),
+    check(
+      'sessions_verified_contact_consistent',
+      sql`(${table.verifiedPhone} is null and ${table.phoneVerifiedAt} is null)
+        or (${table.verifiedPhone} is not null and ${table.phoneVerifiedAt} is not null)`,
+    ),
+    check(
+      'sessions_phone_verification_within_lifetime',
+      sql`${table.phoneVerifiedAt} is null
+        or (${table.phoneVerifiedAt} >= ${table.createdAt}
+          and ${table.phoneVerifiedAt} < ${table.expiresAt})`,
     ),
   ],
 );

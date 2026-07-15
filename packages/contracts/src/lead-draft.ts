@@ -137,10 +137,72 @@ export const LeadFormDataSchema = z.strictObject({
 });
 export type LeadFormData = z.infer<typeof LeadFormDataSchema>;
 
-export const LeadDraftPayloadSchema = LeadFormDataSchema.partial().extend({
-  contact: LeadContactSchema.partial().optional(),
+const RawDraftTextSchema = z.string();
+const RawDraftTaxonomyKeySchema = RawDraftTextSchema.max(64);
+
+const LeadDraftLocationFormStateSchema = z.strictObject({
+  city: RawDraftTextSchema.max(200).optional(),
+  region: RawDraftTextSchema.max(200).optional(),
 });
-export type LeadDraftPayload = z.infer<typeof LeadDraftPayloadSchema>;
+
+const LeadDraftScopeFormStateSchema = z.strictObject({
+  kind: RawDraftTaxonomyKeySchema.optional(),
+  objectCount: RawDraftTextSchema.max(16).optional(),
+});
+
+const LeadDraftAreaFormStateSchema = z.strictObject({
+  status: RawDraftTextSchema.max(32).optional(),
+  squareMeters: RawDraftTextSchema.max(32).optional(),
+});
+
+const LeadDraftDesiredStartFormStateSchema = z.strictObject({
+  status: RawDraftTextSchema.max(32).optional(),
+  date: RawDraftTextSchema.max(32).optional(),
+});
+
+const LeadDraftContactFormStateSchema = z.strictObject({
+  phone: RawDraftTextSchema.max(32).optional(),
+  email: RawDraftTextSchema.max(254).optional(),
+});
+
+const LeadDraftConsentFormStateSchema = z.strictObject({
+  version: RawDraftTextSchema.max(64).optional(),
+  accepted: z.boolean().optional(),
+});
+
+/**
+ * Bounded, lossless form state for autosave. Values deliberately remain raw so an interrupted
+ * input such as an incomplete phone number or decimal can be restored exactly. Validate with
+ * LeadFormDataSchema before advancing a completed step or creating a submission.
+ *
+ * Trusted phone-verification state is intentionally excluded. Clients derive its presentation
+ * from the server-owned session snapshot instead of submitting a boolean in a draft payload.
+ */
+export const LeadDraftFormStateSchema = z.strictObject({
+  role: RawDraftTaxonomyKeySchema.optional(),
+  fullName: RawDraftTextSchema.max(200).optional(),
+  organization: RawDraftTextSchema.max(250).optional(),
+  inn: RawDraftTextSchema.max(12).nullable().optional(),
+  objectType: RawDraftTaxonomyKeySchema.optional(),
+  location: LeadDraftLocationFormStateSchema.optional(),
+  scope: LeadDraftScopeFormStateSchema.optional(),
+  area: LeadDraftAreaFormStateSchema.optional(),
+  currentStage: RawDraftTaxonomyKeySchema.optional(),
+  services: z.array(RawDraftTaxonomyKeySchema).max(20).optional(),
+  expertiseRequired: RawDraftTextSchema.max(32).optional(),
+  culturalHeritageSite: RawDraftTextSchema.max(32).optional(),
+  desiredStart: LeadDraftDesiredStartFormStateSchema.optional(),
+  description: RawDraftTextSchema.max(5_000).optional(),
+  links: z.array(RawDraftTextSchema.max(2_048)).max(10).optional(),
+  documentIds: z.array(RawDraftTextSchema.max(64)).max(20).optional(),
+  selectedCaseIds: z.array(RawDraftTaxonomyKeySchema).max(10).optional(),
+  contact: LeadDraftContactFormStateSchema.optional(),
+  consent: LeadDraftConsentFormStateSchema.optional(),
+});
+export type LeadDraftFormState = z.infer<typeof LeadDraftFormStateSchema>;
+
+export const LeadDraftPayloadSchema = LeadDraftFormStateSchema;
+export type LeadDraftPayload = LeadDraftFormState;
 
 export const LeadDraftUpsertRequestSchema = z.strictObject({
   currentStep: z.number().int().min(1).max(17),

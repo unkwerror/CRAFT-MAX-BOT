@@ -11,5 +11,6 @@ PostgreSQL is the system of record for users, sessions, drafts, submissions, doc
 webhook deduplication and integration retries. The browser never receives MAX or Tracker
 credentials. Files use private storage and only metadata belongs in PostgreSQL.
 
-Stage 1 contains boundaries and contracts, not running services. Runtime implementation is added
-incrementally in later stages of `CRAFT72_MAX_MINIAPP_CODEX_GUIDE.md`.
+Stage 2 runs the Mini App against deterministic in-browser mocks. Trusted MAX authentication,
+contact verification and server-owned drafts start in Stage 3; bot/webhook and durable outbox
+processing follow in Stage 4. The browser bundle never embeds MAX or Tracker credentials.

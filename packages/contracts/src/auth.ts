@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { VerifiedContactSnapshotSchema } from './contact.js';
 import { HttpsUrlSchema, IsoDateTimeSchema } from './primitives.js';
 import { StartParamSchema } from './start-param.js';
 
@@ -29,12 +30,16 @@ export const MaxAuthRequestSchema = z.strictObject({
 });
 export type MaxAuthRequest = z.infer<typeof MaxAuthRequestSchema>;
 
+export const MaxSessionSnapshotSchema = z.strictObject({
+  expiresAt: IsoDateTimeSchema,
+  verifiedContact: VerifiedContactSnapshotSchema.nullable(),
+});
+export type MaxSessionSnapshot = z.infer<typeof MaxSessionSnapshotSchema>;
+
 export const MaxAuthResponseSchema = z.strictObject({
   authenticated: z.literal(true),
   user: MaxUserSchema,
-  session: z.strictObject({
-    expiresAt: IsoDateTimeSchema,
-  }),
+  session: MaxSessionSnapshotSchema,
   startParam: StartParamSchema.nullable(),
 });
 export type MaxAuthResponse = z.infer<typeof MaxAuthResponseSchema>;

@@ -11,8 +11,8 @@ BEGIN
   SELECT count(*)
     INTO target_count
     FROM "drizzle"."__drizzle_migrations"
-   WHERE "created_at" = 1784100487498
-     AND "hash" = '9b44cccfc7c35ab0c619c4d6ac60b7272886f2324fccccd676d54e50f2870114';
+   WHERE "created_at" = 1784103416945
+     AND "hash" = '36a604948a3f6e6a55b20e9d8f41754324eef9be129dc63c5c826f29f4835133';
 
   IF target_count <> 1 THEN
     RAISE EXCEPTION 'Initial rollback refused: target migration ledger entry is missing or invalid';
@@ -23,8 +23,8 @@ BEGIN
   END IF;
 
   DELETE FROM "drizzle"."__drizzle_migrations"
-   WHERE "created_at" = 1784100487498
-     AND "hash" = '9b44cccfc7c35ab0c619c4d6ac60b7272886f2324fccccd676d54e50f2870114';
+   WHERE "created_at" = 1784103416945
+     AND "hash" = '36a604948a3f6e6a55b20e9d8f41754324eef9be129dc63c5c826f29f4835133';
 END
 $rollback$;
 

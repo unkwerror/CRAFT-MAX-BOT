@@ -16,7 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
-    "test": "vitest run",
+    "test": "vitest run && corepack pnpm --filter @craft72/miniapp test",
     "test:coverage": "vitest run --coverage",
     "typecheck": "corepack pnpm --recursive --if-present run typecheck"
   },

@@ -87,6 +87,42 @@ describeWithDatabase('PostgreSQL migrations', () => {
       'webhook_inbox',
     ]);
 
+    const sessionContactColumns = await pool.query<{ column_name: string }>(
+      `select column_name
+         from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'sessions'
+          and column_name = any($1::text[])
+        order by column_name`,
+      [['phone_verified_at', 'verified_phone']],
+    );
+    expect(sessionContactColumns.rows.map(({ column_name: columnName }) => columnName)).toEqual([
+      'phone_verified_at',
+      'verified_phone',
+    ]);
+
+    const maxUserId = '900000000000000001';
+    await pool.query(
+      `insert into "public"."max_users" ("max_user_id", "first_name")
+       values ($1, $2)`,
+      [maxUserId, 'Migration test user'],
+    );
+    await expect(
+      pool.query(
+        `insert into "public"."sessions" ("max_user_id", "expires_at", "verified_phone")
+         values ($1, now() + interval '1 hour', $2)`,
+        [maxUserId, '+79991234567'],
+      ),
+    ).rejects.toThrow();
+    const verifiedSession = await pool.query<{ verified_phone: string }>(
+      `insert into "public"."sessions"
+         ("max_user_id", "expires_at", "verified_phone", "phone_verified_at")
+       values ($1, now() + interval '1 hour', $2, now())
+       returning "verified_phone"`,
+      [maxUserId, '+79991234567'],
+    );
+    expect(verifiedSession.rows[0]?.verified_phone).toBe('+79991234567');
+
     const appliedLedgerRows = await pool.query<{ count: string }>(
       `select count(*)::text as count
          from "drizzle"."__drizzle_migrations"
