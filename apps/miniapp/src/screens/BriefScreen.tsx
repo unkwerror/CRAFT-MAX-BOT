@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { LeadDraftFormState, LeadFormData } from '@craft72/contracts/source';
 
 import {
@@ -692,10 +692,17 @@ export const BriefScreen = ({
   step,
 }: BriefScreenProps) => {
   const [errors, setErrors] = useState<BriefErrors>({});
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
   const meta = BRIEF_STEP_META[step];
 
   useEffect(() => {
     setErrors({});
+    window.scrollTo({ behavior: 'auto', top: 0 });
+    const frame = window.requestAnimationFrame(() => {
+      stepHeadingRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [step]);
 
   const handleDraftChange = (nextDraft: LeadDraftFormState): void => {
@@ -710,36 +717,40 @@ export const BriefScreen = ({
   };
 
   return (
-    <Page className="page--narrow">
+    <Page className="page--narrow" withNavigation={false}>
       <ScreenHeader
         eyebrow={`Шаг ${String(step)} из ${String(BRIEF_TOTAL_STEPS)}`}
         onBack={onBack}
         subtitle="Структурированный бриф проекта"
         title="Новый проект"
       />
-      <ProgressBar current={step} label={meta.title} total={BRIEF_TOTAL_STEPS} />
+      <div className="brief-step" key={step}>
+        <ProgressBar current={step} label={meta.title} total={BRIEF_TOTAL_STEPS} />
 
-      <section className="form-card">
-        <h2 className="form-card__title">{meta.title}</h2>
-        <p className="form-card__subtitle">{meta.subtitle}</p>
-        <div className="form-stack">
-          <BriefStepFields
-            consentVersion={consentVersion}
-            draft={draft}
-            errors={errors}
-            materialCount={materialCount}
-            onChange={handleDraftChange}
-            {...(onEditStep === undefined ? {} : { onEditStep })}
-            {...(onOpenMaterials === undefined ? {} : { onOpenMaterials })}
-            {...(onRequestContact === undefined ? {} : { onRequestContact })}
-            phoneVerified={phoneVerified}
-            {...(privacyPolicyUrl === undefined ? {} : { privacyPolicyUrl })}
-            requestingContact={requestingContact}
-            serverBacked={serverBacked}
-            step={step}
-          />
-        </div>
-      </section>
+        <section className="form-card">
+          <h2 className="form-card__title" ref={stepHeadingRef} tabIndex={-1}>
+            {meta.title}
+          </h2>
+          <p className="form-card__subtitle">{meta.subtitle}</p>
+          <div className="form-stack">
+            <BriefStepFields
+              consentVersion={consentVersion}
+              draft={draft}
+              errors={errors}
+              materialCount={materialCount}
+              onChange={handleDraftChange}
+              {...(onEditStep === undefined ? {} : { onEditStep })}
+              {...(onOpenMaterials === undefined ? {} : { onOpenMaterials })}
+              {...(onRequestContact === undefined ? {} : { onRequestContact })}
+              phoneVerified={phoneVerified}
+              {...(privacyPolicyUrl === undefined ? {} : { privacyPolicyUrl })}
+              requestingContact={requestingContact}
+              serverBacked={serverBacked}
+              step={step}
+            />
+          </div>
+        </section>
+      </div>
 
       <StickyActions
         continueDisabled={isSaving}

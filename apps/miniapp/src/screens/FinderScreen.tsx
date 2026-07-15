@@ -149,7 +149,7 @@ export const FinderScreen = ({ initialInput, onBack, onDiscuss }: FinderScreenPr
   };
 
   return (
-    <Page className="page--narrow">
+    <Page className="page--narrow" withNavigation={false}>
       <ScreenHeader
         eyebrow="Короткая диагностика"
         onBack={onBack}

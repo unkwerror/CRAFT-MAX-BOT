@@ -466,7 +466,7 @@ export const UploadScreen = ({
     externalDocuments.length > 0 || items.some((item) => item.status === 'complete');
 
   return (
-    <Page className="page--narrow">
+    <Page className="page--narrow" withNavigation={false}>
       <div className="page-stack">
         <ScreenHeader
           eyebrow="Материалы проекта"

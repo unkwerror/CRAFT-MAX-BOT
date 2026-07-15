@@ -125,7 +125,7 @@ test('a complete mock brief produces one stable submission', async ({ page }) =>
   await page.getByLabel('Email').fill('project@example.ru');
   await continueBrief(page);
 
-  await page.getByRole('checkbox', { name: /Согласен на обработку данных/ }).check();
+  await page.getByRole('checkbox', { name: /обработку данных заявки/ }).check();
   await continueBrief(page);
 
   await page.getByRole('button', { name: 'Перейти к проверке' }).click();

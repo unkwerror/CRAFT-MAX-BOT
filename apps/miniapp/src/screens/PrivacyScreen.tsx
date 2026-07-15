@@ -25,7 +25,7 @@ export const PrivacyScreen = ({
   const termsText = termsAcceptanceText(consentVersion ?? 'preview');
 
   return (
-    <Page className="page--narrow">
+    <Page className="page--narrow" withNavigation={false}>
       <ScreenHeader
         eyebrow="О данных"
         onBack={onBack}

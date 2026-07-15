@@ -115,13 +115,12 @@ export const CasesScreen = ({
       <ScreenHeader
         eyebrow="Портфолио"
         onBack={onBack}
-        subtitle="Реальные проекты из опубликованного портфолио CRAFT GROUP."
-        title="Проекты CRAFT72"
+        subtitle="Реализованные и проектируемые объекты из портфолио бюро."
+        title="Проекты КРАФТ"
       />
 
       <InlineNotice icon="projects">
-        Изображения сохранены в приложении с официального сайта — каталог не зависит от
-        runtime-скрейпинга.
+        В каталоге используются фотографии проектов с официального сайта КРАФТ.
       </InlineNotice>
 
       <section aria-label="Фильтры проектов" className="filter-bar">

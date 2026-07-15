@@ -206,7 +206,7 @@ export const SummaryScreen = ({
   const sections = buildSummarySections(form, documentNames, phoneVerified, serverBacked);
 
   return (
-    <Page className="page--narrow">
+    <Page className="page--narrow" withNavigation={false}>
       <ScreenHeader
         eyebrow="Проверка"
         onBack={onBack}

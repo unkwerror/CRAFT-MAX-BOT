@@ -20,17 +20,14 @@ export interface AppTopbarProps {
 export const AppTopbar = ({ onNavigate, status = 'Проектное бюро' }: AppTopbarProps) => (
   <header className="app-topbar">
     <button className="brand" onClick={() => onNavigate('home')} type="button">
-      <span className="brand__mark" aria-hidden="true">
-        C72
+      <span className="brand__wordmark" aria-label="КРАФТ">
+        КРАФТ<span aria-hidden="true">.</span>
       </span>
-      <span>
-        <strong>CRAFT72</strong>
-        <small>{status}</small>
-      </span>
+      <span className="brand__product">MAX MINI APP</span>
     </button>
-    <span className="app-topbar__secure">
-      <Icon name="shield" size={16} />
-      Локальный черновик
+    <span className="app-topbar__secure" title={status}>
+      <span aria-hidden="true" className="app-topbar__status-dot" />
+      <span className="app-topbar__status-copy">{status}</span>
     </span>
   </header>
 );

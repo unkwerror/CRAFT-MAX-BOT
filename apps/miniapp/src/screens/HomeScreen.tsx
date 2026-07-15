@@ -59,43 +59,57 @@ export const HomeScreen = ({
   <Page>
     <div className="home-layout">
       <section className="hero">
-        <span className="hero__tag">
-          <Icon name="spark" size={15} />
-          Архитектура · инженерия · развитие
-        </span>
-        <h1>
-          Проект начинается с <em>точного вопроса</em>
-        </h1>
-        <p>
-          Расскажите о задаче — соберём исходные данные, предложим подходящие направления и
-          подготовим заявку для проектной команды CRAFT72.
-        </p>
-        <div className="hero__actions">
-          <Button
-            className="hero__primary"
-            iconAfter={<Icon name="arrow" size={19} />}
-            onClick={() => onNavigate('brief')}
-            size="large"
-            type="button"
-          >
-            Начать бриф
-          </Button>
-          <Button
-            className="hero__secondary"
-            mode="secondary"
-            onClick={() => onNavigate('cases')}
-            size="large"
-            type="button"
-          >
-            Смотреть проекты
-          </Button>
+        <div className="hero__content">
+          <span className="hero__eyebrow">
+            <b>01</b>
+            Архитектура · инженерия · развитие
+          </span>
+          <h1>
+            Проект <span className="hero__line">начинается с</span>
+            <em>точного вопроса</em>
+          </h1>
+          <p>
+            Соберём исходные данные, определим состав работ и передадим задачу профильной команде
+            КРАФТ.
+          </p>
+          <div className="hero__actions">
+            <Button
+              className="hero__primary"
+              iconAfter={<Icon name="arrow" size={19} />}
+              onClick={() => onNavigate('brief')}
+              size="large"
+              type="button"
+            >
+              Начать бриф
+            </Button>
+            <Button
+              className="hero__secondary"
+              mode="secondary"
+              onClick={() => onNavigate('cases')}
+              size="large"
+              type="button"
+            >
+              Смотреть проекты
+            </Button>
+          </div>
         </div>
+        <figure className="hero__media">
+          <img
+            alt="Деловой дом — проект КРАФТ в Тюмени"
+            src="/portfolio/business-center-tyumen.jpg"
+          />
+          <figcaption>
+            <span>Тюмень · 42 000 м²</span>
+            <strong>Деловой дом</strong>
+          </figcaption>
+        </figure>
       </section>
 
-      <section>
+      <section className="home-actions">
         <div className="section-heading">
           <div>
-            <h2>С чего начнём?</h2>
+            <span className="section-heading__index">02 / Маршрут</span>
+            <h2>С чего начнём</h2>
             <p>Выберите удобный сценарий</p>
           </div>
         </div>
@@ -114,7 +128,7 @@ export const HomeScreen = ({
         )}
 
         <div className="action-grid">
-          {actions.map((action) => (
+          {actions.map((action, index) => (
             <button
               className="action-card"
               key={action.label}
@@ -124,8 +138,11 @@ export const HomeScreen = ({
               }}
               type="button"
             >
-              <span className="action-card__icon">
-                <Icon name={action.icon} size={22} />
+              <span className="action-card__topline">
+                <span className="action-card__index">{String(index + 1).padStart(2, '0')}</span>
+                <span className="action-card__icon">
+                  <Icon name={action.icon} size={22} />
+                </span>
               </span>
               <span className="action-card__copy">
                 <span>
@@ -144,8 +161,8 @@ export const HomeScreen = ({
             <span>понятных шагов</span>
           </div>
           <div>
-            <strong>50 МБ</strong>
-            <span>на один файл</span>
+            <strong>8</strong>
+            <span>реальных проектов</span>
           </div>
           <div>
             <strong>Auto</strong>
@@ -153,13 +170,17 @@ export const HomeScreen = ({
           </div>
         </div>
 
-        <div className="section-heading">
+        <div className="trust-panel">
           <div>
-            <h2>Прозрачно и безопасно</h2>
-            <p>Только данные, необходимые для обсуждения проекта</p>
+            <span className="section-heading__index">03 / Данные</span>
+            <h2>Только необходимое</h2>
+            <p>
+              До согласия данные не уходят на сервер. Черновик можно продолжить позже, а заявку —
+              отправить только вручную.
+            </p>
           </div>
           <button onClick={() => onNavigate('privacy')} type="button">
-            О данных
+            Как мы храним данные <Icon name="arrow" size={18} />
           </button>
         </div>
       </section>

@@ -82,7 +82,7 @@ const normalizeServerDraft = (draft: LeadDraftFormState): LeadDraftFormState => 
 });
 
 const RuntimeUnavailableScreen = () => (
-  <Page className="page--narrow">
+  <Page className="page--narrow" withNavigation={false}>
     <section className="content-card privacy-copy">
       <h1>Сервис временно недоступен</h1>
       <InlineNotice icon="warning" tone="warning">
@@ -154,7 +154,7 @@ export const App = () => {
     const href = routeHref(nextRoute);
     if (window.location.hash !== href) window.location.hash = href;
     setRoute(nextRoute);
-    window.scrollTo({ behavior: 'smooth', top: 0 });
+    window.scrollTo({ behavior: 'auto', top: 0 });
   }, []);
 
   const persistDraft = useCallback(
@@ -770,10 +770,12 @@ export const App = () => {
       <div className="app" data-platform={maxBridge.getPlatform()}>
         <AppTopbar onNavigate={handleNavigation} status={runtimeLabel} />
         <div className="mock-ribbon">{runtimeNotice}</div>
-        {screen}
         {showNavigation ? (
           <BottomNav activeRoute={activeNavigationRoute(route)} onNavigate={handleNavigation} />
         ) : null}
+        <div className="screen-shell" key={`${runtimeStatus}:${route}`}>
+          {screen}
+        </div>
         {toast === null ? null : <Toast message={toast} onClose={() => setToast(null)} />}
       </div>
     </MaxUI>
