@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: craft72_test
+          POSTGRES_PASSWORD: craft72_test
+          POSTGRES_USER: craft72_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U craft72_test -d craft72_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://craft72_test:craft72_test@127.0.0.1:5432/craft72_test
+      MIGRATION_TEST_ALLOW_DESTRUCTIVE: 'true'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run deterministic quality gate
+        run: pnpm run check
+
+      - name: Ensure no environment files are tracked
+        run: test -z "$(git ls-files '.env' '.env.*' ':!.env.example')"

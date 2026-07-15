@@ -1,0 +1,35 @@
+{
+  "name": "craft72-max-app",
+  "version": "0.0.0",
+  "private": true,
+  "description": "CRAFT72 MAX bot, Mini App and backend monorepo",
+  "type": "module",
+  "packageManager": "pnpm@11.13.0",
+  "engines": {
+    "node": ">=22.13.0 <25",
+    "pnpm": ">=11.13.0 <12"
+  },
+  "scripts": {
+    "build": "corepack pnpm --recursive --if-present run build",
+    "check": "corepack pnpm format:check && corepack pnpm lint && corepack pnpm typecheck && corepack pnpm db:check && corepack pnpm test && corepack pnpm build",
+    "db:check": "corepack pnpm --filter @craft72/database db:check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "corepack pnpm --recursive --if-present run typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "10.7.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.7.0",
+    "prettier": "3.9.5",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.64.0",
+    "vitest": "4.1.10"
+  }
+}

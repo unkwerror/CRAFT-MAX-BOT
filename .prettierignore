@@ -1,0 +1,6 @@
+node_modules
+dist
+coverage
+pnpm-lock.yaml
+packages/database/drizzle/meta
+CRAFT72_MAX_MINIAPP_CODEX_GUIDE.md

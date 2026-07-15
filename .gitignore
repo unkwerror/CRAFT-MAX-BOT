@@ -1,0 +1,27 @@
+# Dependencies and build output
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data
+logs/
+uploads/
+tmp/
+*.log
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
