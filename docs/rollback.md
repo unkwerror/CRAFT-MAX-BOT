@@ -50,17 +50,22 @@ set +x
 set -a
 . /home/mun/apps/craft72-max-app/shared/.env 2>/dev/null
 set +a
+pattern='^postgres(ql)?://([A-Za-z_][A-Za-z0-9_-]*):([A-Za-z0-9._~-]+)@127[.]0[.]0[.]1:5432/([A-Za-z_][A-Za-z0-9_-]*)$'
+[[ "$DATABASE_URL" =~ $pattern ]]
+export PGHOST=127.0.0.1 PGPORT=5432
+export PGUSER="${BASH_REMATCH[2]}" PGPASSWORD="${BASH_REMATCH[3]}" PGDATABASE="${BASH_REMATCH[4]}"
+unset MAX_BOT_TOKEN MAX_WEBHOOK_SECRET TRACKER_TOKEN
 backup=/home/mun/apps/craft72-max-app/shared/backups/database/craft72-RELEASE.dump
 test -r "$backup"
 pg_restore --list "$backup" >/dev/null
 pm2 stop craft72-max-api
-PGDATABASE="$DATABASE_URL" pg_restore --exit-on-error --clean --if-exists --no-owner --no-privileges "$backup"
+pg_restore --exit-on-error --clean --if-exists --no-owner --no-privileges "$backup"
 cd /home/mun/apps/craft72-max-app/current/api
 NODE_ENV=production node run-migrations.mjs
 CRAFT72_DEPLOY_ROOT=/home/mun/apps/craft72-max-app \
 CRAFT72_ENV_FILE=/home/mun/apps/craft72-max-app/shared/.env \
 pm2 startOrReload ../deploy/ecosystem.config.cjs --only craft72-max-api --update-env
-unset DATABASE_URL
+unset DATABASE_URL PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE
 curl -fsS http://127.0.0.1:4100/health/ready
 ```
 

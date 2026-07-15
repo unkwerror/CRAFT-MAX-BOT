@@ -34,12 +34,17 @@ set +x
 set -a
 . /home/mun/apps/craft72-max-app/shared/.env 2>/dev/null
 set +a
+pattern='^postgres(ql)?://([A-Za-z_][A-Za-z0-9_-]*):([A-Za-z0-9._~-]+)@127[.]0[.]0[.]1:5432/([A-Za-z_][A-Za-z0-9_-]*)$'
+[[ "$DATABASE_URL" =~ $pattern ]]
+export PGHOST=127.0.0.1 PGPORT=5432
+export PGUSER="${BASH_REMATCH[2]}" PGPASSWORD="${BASH_REMATCH[3]}" PGDATABASE="${BASH_REMATCH[4]}"
+unset DATABASE_URL MAX_BOT_TOKEN MAX_WEBHOOK_SECRET TRACKER_TOKEN
 umask 077
 backup=/home/mun/apps/craft72-max-app/shared/backups/database/craft72-manual-$(date -u +%Y%m%dT%H%M%SZ).dump
-PGDATABASE="$DATABASE_URL" pg_dump --format=custom --compress=6 --file="$backup"
+pg_dump --format=custom --compress=6 --file="$backup"
 test -s "$backup"
 chmod 600 "$backup"
-unset DATABASE_URL
+unset PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE
 ```
 
 Backups stay on the application server for at most `BACKUP_RETENTION_DAYS` (policy maximum: 30).

@@ -33,6 +33,20 @@ LOG_DIRECTORY="${DEPLOY_ROOT}/shared/logs"
 switched=false
 previous_release=""
 
+configure_libpq_environment() {
+  local pattern='^postgres(ql)?://([A-Za-z_][A-Za-z0-9_-]*):([A-Za-z0-9._~-]+)@127[.]0[.]0[.]1:5432/([A-Za-z_][A-Za-z0-9_-]*)$'
+  [[ "${DATABASE_URL}" =~ ${pattern} ]] || {
+    echo "DATABASE_URL must use the dedicated local PostgreSQL connection format." >&2
+    return 2
+  }
+  export PGHOST=127.0.0.1
+  export PGPORT=5432
+  export PGUSER="${BASH_REMATCH[2]}"
+  export PGPASSWORD="${BASH_REMATCH[3]}"
+  export PGDATABASE="${BASH_REMATCH[4]}"
+  unset DATABASE_URL
+}
+
 for command_name in curl node pg_dump pm2 readlink; do
   command -v "${command_name}" >/dev/null || {
     echo "Required server command is missing: ${command_name}." >&2
@@ -106,7 +120,9 @@ if ! (
   . "${ENVIRONMENT_FILE}" 2>/dev/null
   set +a
   : "${DATABASE_URL:?}"
-  PGDATABASE="${DATABASE_URL}" pg_dump --format=custom --compress=6 --file="${backup_temporary}"
+  configure_libpq_environment
+  unset MAX_BOT_TOKEN MAX_WEBHOOK_SECRET TRACKER_TOKEN
+  pg_dump --format=custom --compress=6 --file="${backup_temporary}"
 ) 2>/dev/null; then
   rm -f -- "${backup_temporary}"
   echo "The pre-migration database backup failed; connection details were suppressed." >&2
@@ -124,6 +140,7 @@ echo "Applying all pending reviewed migrations before the release switch..."
   . "${ENVIRONMENT_FILE}" 2>/dev/null
   set +a
   : "${DATABASE_URL:?}"
+  unset MAX_BOT_TOKEN MAX_WEBHOOK_SECRET TRACKER_TOKEN
   NODE_ENV=production node run-migrations.mjs
 )
 

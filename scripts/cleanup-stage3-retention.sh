@@ -13,6 +13,20 @@ STATE_DIRECTORY="${DEPLOY_ROOT}/shared/retention"
 LOCK_FILE="${STATE_DIRECTORY}/cleanup.lock"
 LAST_RUN_FILE="${STATE_DIRECTORY}/last-success.epoch"
 
+configure_libpq_environment() {
+  local pattern='^postgres(ql)?://([A-Za-z_][A-Za-z0-9_-]*):([A-Za-z0-9._~-]+)@127[.]0[.]0[.]1:5432/([A-Za-z_][A-Za-z0-9_-]*)$'
+  [[ "${DATABASE_URL}" =~ ${pattern} ]] || {
+    echo "DATABASE_URL must use the dedicated local PostgreSQL connection format." >&2
+    return 2
+  }
+  export PGHOST=127.0.0.1
+  export PGPORT=5432
+  export PGUSER="${BASH_REMATCH[2]}"
+  export PGPASSWORD="${BASH_REMATCH[3]}"
+  export PGDATABASE="${BASH_REMATCH[4]}"
+  unset DATABASE_URL
+}
+
 [[ "${DEPLOY_ROOT}" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "${DEPLOY_ROOT}" != *..* ]] || {
   echo "DEPLOY_ROOT is invalid." >&2
   exit 2
@@ -42,6 +56,8 @@ set +a
 : "${RETENTION_CLEANUP_INTERVAL_SECONDS:?}"
 : "${LOG_RETENTION_DAYS:?}"
 : "${BACKUP_RETENTION_DAYS:?}"
+configure_libpq_environment
+unset MAX_BOT_TOKEN MAX_WEBHOOK_SECRET TRACKER_TOKEN
 
 for value_name in \
   SUBMISSION_RETENTION_DAYS RETENTION_CLEANUP_INTERVAL_SECONDS LOG_RETENTION_DAYS BACKUP_RETENTION_DAYS; do
@@ -75,7 +91,7 @@ if [[ "${1:-}" != "--force" && -s "${LAST_RUN_FILE}" ]]; then
 fi
 
 echo "Applying the configured Stage 3 retention windows..."
-PGDATABASE="${DATABASE_URL}" psql --no-psqlrc --set=ON_ERROR_STOP=1 \
+psql --no-psqlrc --set=ON_ERROR_STOP=1 \
   --set="submission_days=${SUBMISSION_RETENTION_DAYS}" \
   --set="log_days=${LOG_RETENTION_DAYS}" <<'RETENTION_SQL'
 BEGIN;
