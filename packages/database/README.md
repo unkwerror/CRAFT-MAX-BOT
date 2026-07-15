@@ -10,9 +10,11 @@ pnpm --filter @craft72/database db:migrate
 ```
 
 `db:check` validates migration metadata and generates against a temporary copy to detect drift
-without changing the working tree. The initial `down` migration refuses to run unless its exact
-timestamp and SHA-256 hash are the only entry in the Drizzle ledger. It is intended for an
-isolated test or staging database after backup, not as a routine production rollback.
+without changing the working tree. The reviewed `down` migrations validate the exact Drizzle
+ledger timestamps and SHA-256 hashes, and refuse to run when a newer or unknown migration is
+present. `0001_stage3_runtime.down.sql` removes the Stage 3 session-token, start-parameter and
+submission-request fingerprints; use it only on an isolated development/test database after a
+backup. The rollbacks are not a routine production workflow.
 
 Staged documents belong to a MAX user before a submission exists. Attaching one to a submission
 must be a single conditional update that verifies the owner, `submission_id is null`,

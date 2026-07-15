@@ -13,11 +13,23 @@ const validEnvironment = {
   API_HOST: '127.0.0.1',
   API_PORT: '4100',
   PUBLIC_BASE_URL: 'https://craft72app.ru',
+  PRIVACY_POLICY_URL: 'https://craft72app.ru/privacy.html',
+  CONSENT_VERSION: 'miniapp-2026-07-15',
   MAX_API_BASE_URL: 'https://platform-api2.max.ru',
   MAX_BOT_TOKEN: 'rotated-token-with-enough-length',
   MAX_WEBHOOK_SECRET: 'a-random-webhook-secret-with-32-characters',
   MAX_INIT_DATA_MAX_AGE_SECONDS: '3600',
+  MAX_CONTACT_MAX_AGE_SECONDS: '300',
+  SESSION_TTL_SECONDS: '3600',
+  DRAFT_TTL_SECONDS: '2592000',
+  SUBMISSION_RETENTION_DAYS: '1095',
+  RETENTION_CLEANUP_INTERVAL_SECONDS: '21600',
+  API_RATE_LIMIT_MAX: '120',
+  API_RATE_LIMIT_WINDOW_SECONDS: '60',
   DATABASE_URL: 'postgresql://craft72:password@127.0.0.1:5432/craft72_max_app',
+  DB_POOL_MAX: '10',
+  DB_CONNECTION_TIMEOUT_MS: '5000',
+  DB_STATEMENT_TIMEOUT_MS: '10000',
   TRACKER_API_BASE_URL: 'https://api.tracker.yandex.net/v3',
   TRACKER_AUTH_TYPE: 'oauth',
   TRACKER_TOKEN: 'tracker-token-with-enough-length',
@@ -31,6 +43,9 @@ const validEnvironment = {
   UPLOAD_STAGING_TTL_SECONDS: '86400',
   UPLOAD_STORAGE_PATH: '/srv/craft72-max-app/uploads',
   LOG_LEVEL: 'info',
+  LOG_RETENTION_DAYS: '90',
+  BACKUP_RETENTION_DAYS: '30',
+  SHUTDOWN_GRACE_MS: '10000',
 } as const;
 
 describe('parseServerEnvironment', () => {
@@ -54,6 +69,9 @@ describe('parseServerEnvironment', () => {
     expect(environment.TRACKER_DRY_RUN).toBe(true);
     expect(environment.UPLOAD_MAX_BYTES).toBe(52_428_800);
     expect(environment.UPLOAD_STAGING_TTL_SECONDS).toBe(86_400);
+    expect(environment.SESSION_TTL_SECONDS).toBe(3_600);
+    expect(environment.DRAFT_TTL_SECONDS).toBe(2_592_000);
+    expect(environment.SUBMISSION_RETENTION_DAYS).toBe(1_095);
   });
 
   it('rejects unsupported MAX API endpoints', () => {
@@ -125,5 +143,32 @@ describe('parseServerEnvironment', () => {
         PUBLIC_BASE_URL: 'http://craft72app.ru',
       }),
     ).toThrow(ConfigurationError);
+  });
+
+  it('requires an approved HTTPS privacy policy and version', () => {
+    expect(() =>
+      parseServerEnvironment({
+        ...validEnvironment,
+        PRIVACY_POLICY_URL: '<APPROVED_HTTPS_URL>',
+      }),
+    ).toThrow(ConfigurationError);
+    expect(() =>
+      parseServerEnvironment({
+        ...validEnvironment,
+        CONSENT_VERSION: 'invalid version',
+      }),
+    ).toThrow(ConfigurationError);
+  });
+
+  it('enforces the retention limits published by the Mini App policy', () => {
+    for (const override of [
+      { SUBMISSION_RETENTION_DAYS: '1096' },
+      { LOG_RETENTION_DAYS: '91' },
+      { BACKUP_RETENTION_DAYS: '31' },
+    ]) {
+      expect(() => parseServerEnvironment({ ...validEnvironment, ...override })).toThrow(
+        ConfigurationError,
+      );
+    }
   });
 });

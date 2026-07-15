@@ -19,20 +19,22 @@ describe('CasesScreen', () => {
     fireEvent.change(screen.getByLabelText('Услуга'), {
       target: { value: 'restoration' },
     });
+    fireEvent.change(screen.getByLabelText('Город'), {
+      target: { value: 'Тобольск' },
+    });
 
     expect(screen.getAllByRole('article')).toHaveLength(1);
     expect(
-      screen.getByRole('heading', { name: 'Реставрация исторического квартала в Тюмени' }),
+      screen.getByRole('heading', { name: 'Ансамбль городской насосной станции' }),
     ).toBeTruthy();
+    expect(
+      screen.getByAltText('Проект «Ансамбль городской насосной станции»').getAttribute('src'),
+    ).toBe('/portfolio/city-pumping-station-tobolsk.jpg');
 
     fireEvent.click(screen.getByRole('button', { name: 'Страница проекта ↗' }));
-    expect(bridge.openLink).toHaveBeenCalledWith(
-      'https://craft72.ru/projects/tyumen-heritage-quarter',
-    );
+    expect(bridge.openLink).toHaveBeenCalledWith('https://craft72.ru/citypumpingstation');
     fireEvent.click(screen.getByRole('button', { name: 'Обсудить похожий' }));
-    expect(onDiscuss).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'tyumen-heritage-quarter' }),
-    );
+    expect(onDiscuss).toHaveBeenCalledWith(expect.objectContaining({ id: 'citypumpingstation' }));
     expect(fetchSpy).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Сбросить фильтры' }));
@@ -45,7 +47,7 @@ describe('CasesScreen', () => {
         bridge={{ openLink: () => false }}
         onBack={vi.fn()}
         onDiscuss={vi.fn()}
-        selectedCaseIds={['tyumen-heritage-quarter']}
+        selectedCaseIds={['businesshouse']}
       />,
     );
 

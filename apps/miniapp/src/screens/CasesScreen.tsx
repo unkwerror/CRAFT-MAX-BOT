@@ -7,7 +7,6 @@ import { Icon } from '../components/Icon.js';
 import { Page, ScreenHeader } from '../components/Layout.js';
 import {
   CONSTRUCTION_KIND_OPTIONS,
-  MOCK_CONTENT_NOTICE,
   OBJECT_TYPE_OPTIONS,
   SCALE_OPTIONS,
   SERVICE_OPTIONS,
@@ -114,13 +113,16 @@ export const CasesScreen = ({
   return (
     <Page>
       <ScreenHeader
-        eyebrow="Демонстрационный каталог"
+        eyebrow="Портфолио"
         onBack={onBack}
-        subtitle="Фильтры работают локально по курируемому набору кейсов — без runtime-скрейпинга."
+        subtitle="Реальные проекты из опубликованного портфолио CRAFT GROUP."
         title="Проекты CRAFT72"
       />
 
-      <InlineNotice icon="projects">{MOCK_CONTENT_NOTICE}</InlineNotice>
+      <InlineNotice icon="projects">
+        Изображения сохранены в приложении с официального сайта — каталог не зависит от
+        runtime-скрейпинга.
+      </InlineNotice>
 
       <section aria-label="Фильтры проектов" className="filter-bar">
         <FilterSelect

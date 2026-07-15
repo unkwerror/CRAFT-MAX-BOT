@@ -1,5 +1,5 @@
 import { MaxUI } from '@maxhub/max-ui';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   CaseCatalogItem,
   LeadDraft,
@@ -8,8 +8,10 @@ import type {
   Submission,
 } from '@craft72/contracts/source';
 
+import { Stage3ApiClient } from './api/index.js';
 import { createEmptyDraft, toFinalLeadForm } from './brief/draft.js';
-import { AppTopbar, BottomNav, LoadingScreen, Toast } from './components/Layout.js';
+import { InlineNotice } from './components/FormControls.js';
+import { AppTopbar, BottomNav, LoadingScreen, Page, Toast } from './components/Layout.js';
 import type { ServiceRecommendation } from './domain/index.js';
 import {
   createBrowserDraftStorage,
@@ -20,6 +22,7 @@ import {
 } from './mock/index.js';
 import { getRouteFromHash, routeHref, type AppRoute } from './navigation.js';
 import { maxBridge } from './platform/index.js';
+import { privacyConfiguration } from './runtime/privacy-config.js';
 import { BRIEF_TOTAL_STEPS, BriefScreen, type BriefStep } from './screens/BriefScreen.js';
 import { CasesScreen } from './screens/CasesScreen.js';
 import { FinderScreen } from './screens/FinderScreen.js';
@@ -64,8 +67,50 @@ const activeNavigationRoute = (route: AppRoute): AppRoute => {
   return 'home';
 };
 
+type RuntimeStatus = 'awaiting-consent' | 'connected' | 'connecting' | 'error' | 'preview';
+
+const normalizeServerDraft = (draft: LeadDraftFormState): LeadDraftFormState => ({
+  ...draft,
+  consent: {
+    accepted:
+      draft.consent?.version === privacyConfiguration.consentVersion &&
+      draft.consent.accepted === true,
+    version: privacyConfiguration.consentVersion,
+  },
+  // Upload intents and private storage are Stage 5. Never submit browser mock document IDs.
+  documentIds: [],
+});
+
+const RuntimeUnavailableScreen = () => (
+  <Page className="page--narrow">
+    <section className="content-card privacy-copy">
+      <h1>Сервис временно недоступен</h1>
+      <InlineNotice icon="warning" tone="warning">
+        <strong>MAX-сессия не установлена</strong>
+        <span>
+          Данные заявки не отправлялись. Закройте и снова откройте Mini App из MAX либо повторите
+          позже.
+        </span>
+      </InlineNotice>
+      <button className="save-exit" onClick={() => window.location.reload()} type="button">
+        Повторить подключение
+      </button>
+    </section>
+  </Page>
+);
+
 export const App = () => {
   const browserStorage = useMemo(() => createBrowserDraftStorage(), []);
+  const serverApi = useMemo(() => new Stage3ApiClient(), []);
+  const initData = useMemo(() => maxBridge.getInitData(), []);
+  const shouldUseServer = privacyConfiguration.productionDataEnabled && initData !== null;
+  const termsUrl = useMemo(
+    () =>
+      privacyConfiguration.policyUrl === null
+        ? null
+        : new URL('terms.html', privacyConfiguration.policyUrl).toString(),
+    [],
+  );
   const draftRepository = useMemo(
     () => new LocalStorageDraftRepository(browserStorage),
     [browserStorage],
@@ -76,12 +121,16 @@ export const App = () => {
     () => new MockSubmissionApi({ documentSource: uploadApi, session }),
     [session, uploadApi],
   );
-  const initialSavedDraft = useMemo(() => draftRepository.load(), [draftRepository]);
+  const initialSavedDraft = useMemo(
+    () => (shouldUseServer ? null : draftRepository.load()),
+    [draftRepository, shouldUseServer],
+  );
+  const draftSaveQueue = useRef<Promise<void>>(Promise.resolve());
 
   const [route, setRoute] = useState<AppRoute>(() => getRouteFromHash(window.location.hash));
   const [savedDraft, setSavedDraft] = useState<LeadDraft | null>(initialSavedDraft);
   const [draft, setDraft] = useState<LeadDraftFormState>(
-    () => initialSavedDraft?.payload ?? createEmptyDraft(),
+    () => initialSavedDraft?.payload ?? createEmptyDraft(privacyConfiguration.consentVersion),
   );
   const [briefStep, setBriefStep] = useState<BriefStep>(() =>
     asBriefStep(initialSavedDraft?.currentStep ?? 1),
@@ -91,6 +140,11 @@ export const App = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [returnToSummaryAfterEdit, setReturnToSummaryAfterEdit] = useState(false);
   const [requestingContact, setRequestingContact] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(
+    shouldUseServer ? 'awaiting-consent' : 'preview',
+  );
+  const [serverVerifiedPhone, setServerVerifiedPhone] = useState<string | null>(null);
+  const [privacyAcknowledged, setPrivacyAcknowledged] = useState(!shouldUseServer);
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [submitError, setSubmitError] = useState<string | undefined>();
   const [toast, setToast] = useState<string | null>(null);
@@ -104,18 +158,84 @@ export const App = () => {
   }, []);
 
   const persistDraft = useCallback(
-    (nextDraft: LeadDraftFormState, step: BriefStep): LeadDraft => {
-      const stored = draftRepository.saveAfterStep({ currentStep: step, payload: nextDraft });
-      setSavedDraft(stored);
-      return stored;
+    async (nextDraft: LeadDraftFormState, step: BriefStep): Promise<LeadDraft> => {
+      if (!shouldUseServer) {
+        const stored = draftRepository.saveAfterStep({ currentStep: step, payload: nextDraft });
+        setSavedDraft(stored);
+        return stored;
+      }
+
+      if (runtimeStatus !== 'connected' || !privacyAcknowledged) {
+        throw new Error('The production session is not connected');
+      }
+
+      const save = draftSaveQueue.current.then(async () => {
+        const response = await serverApi.upsertDraft({
+          currentStep: step,
+          payload: normalizeServerDraft(nextDraft),
+        });
+        setSavedDraft(response.draft);
+        return response.draft;
+      });
+      draftSaveQueue.current = save.then(
+        () => undefined,
+        () => undefined,
+      );
+      return save;
     },
-    [draftRepository],
+    [draftRepository, privacyAcknowledged, runtimeStatus, serverApi, shouldUseServer],
   );
 
   const updateDraft = useCallback((nextDraft: LeadDraftFormState): void => {
     setHasActiveDraft(true);
     setDraft(nextDraft);
   }, []);
+
+  useEffect(() => {
+    if (!shouldUseServer || initData === null || !privacyAcknowledged) return undefined;
+
+    const controller = new AbortController();
+    let active = true;
+    setRuntimeStatus('connecting');
+
+    void (async () => {
+      try {
+        const authenticated = await serverApi.authenticate(
+          initData,
+          privacyConfiguration.consentVersion,
+          { signal: controller.signal },
+        );
+        const response = await serverApi.getDraft({ signal: controller.signal });
+        if (!active) return;
+
+        setServerVerifiedPhone(authenticated.session.verifiedContact?.phone ?? null);
+        if (response.draft === null) {
+          setSavedDraft(null);
+          setDraft(createEmptyDraft(privacyConfiguration.consentVersion));
+          setBriefStep(1);
+          setHasActiveDraft(false);
+        } else {
+          const payload = normalizeServerDraft(response.draft.payload);
+          setSavedDraft({ ...response.draft, payload });
+          setDraft(payload);
+          setBriefStep(asBriefStep(response.draft.currentStep));
+          setHasActiveDraft(true);
+        }
+        setRuntimeStatus('connected');
+      } catch {
+        if (!active || controller.signal.aborted) return;
+        serverApi.clearSession();
+        setRuntimeStatus('error');
+        setToast('Не удалось установить защищённую MAX-сессию');
+      }
+    })();
+
+    return () => {
+      active = false;
+      controller.abort();
+      serverApi.clearSession();
+    };
+  }, [initData, privacyAcknowledged, serverApi, shouldUseServer]);
 
   useEffect(() => {
     const syncRoute = (): void => setRoute(getRouteFromHash(window.location.hash));
@@ -130,7 +250,7 @@ export const App = () => {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    themeColor?.setAttribute('content', theme === 'dark' ? '#141615' : '#f3f1eb');
+    themeColor?.setAttribute('content', theme === 'dark' ? '#0c0d0f' : '#f5f5f4');
     return maxBridge.subscribeTheme(setTheme);
   }, [theme]);
 
@@ -160,15 +280,18 @@ export const App = () => {
 
   useEffect(() => {
     if (!hasActiveDraft) return undefined;
+    if (shouldUseServer && !privacyAcknowledged) return undefined;
     const timeout = window.setTimeout(() => {
-      try {
-        persistDraft(draft, briefStep);
-      } catch {
-        setToast('Не удалось сохранить черновик на этом устройстве');
-      }
+      void persistDraft(draft, briefStep).catch(() => {
+        setToast(
+          shouldUseServer
+            ? 'Не удалось сохранить черновик на сервере'
+            : 'Не удалось сохранить черновик на этом устройстве',
+        );
+      });
     }, 180);
     return () => window.clearTimeout(timeout);
-  }, [briefStep, draft, hasActiveDraft, persistDraft]);
+  }, [briefStep, draft, hasActiveDraft, persistDraft, privacyAcknowledged, shouldUseServer]);
 
   useEffect(() => {
     if (toast === null) return undefined;
@@ -209,9 +332,17 @@ export const App = () => {
   }, [handleBack, route]);
 
   const openBrief = useCallback((): void => {
+    if (shouldUseServer && runtimeStatus !== 'connected') {
+      setToast('Дождитесь подключения защищённой MAX-сессии');
+      return;
+    }
+    if (shouldUseServer && !privacyAcknowledged) {
+      navigate('privacy');
+      return;
+    }
     setHasActiveDraft(true);
     navigate('brief');
-  }, [navigate]);
+  }, [navigate, privacyAcknowledged, runtimeStatus, shouldUseServer]);
 
   const handleNavigation = useCallback(
     (nextRoute: AppRoute): void => {
@@ -230,18 +361,20 @@ export const App = () => {
         setDraft(cleaned);
         setHasActiveDraft(true);
         if (returnToSummaryAfterEdit && safeFinalForm(cleaned) !== null) {
-          persistDraft(cleaned, 17);
+          await persistDraft(cleaned, 17);
           setReturnToSummaryAfterEdit(false);
           navigate('summary');
         } else if (briefStep < BRIEF_TOTAL_STEPS) {
           const nextStep = asBriefStep(briefStep + 1);
-          persistDraft(cleaned, nextStep);
+          await persistDraft(cleaned, nextStep);
           setBriefStep(nextStep);
         } else {
-          persistDraft(cleaned, 17);
+          await persistDraft(cleaned, 17);
           setReturnToSummaryAfterEdit(false);
           navigate('summary');
         }
+      } catch {
+        setToast('Не удалось сохранить черновик. Проверьте подключение и повторите.');
       } finally {
         setIsSaving(false);
       }
@@ -257,10 +390,12 @@ export const App = () => {
         const cleaned = cleanDraftForValidation(nextDraft);
         setDraft(cleaned);
         setHasActiveDraft(true);
-        persistDraft(cleaned, briefStep);
+        await persistDraft(cleaned, briefStep);
         setReturnToSummaryAfterEdit(false);
         setToast('Черновик сохранён');
         navigate('home');
+      } catch {
+        setToast('Не удалось сохранить черновик. Проверьте подключение и повторите.');
       } finally {
         setIsSaving(false);
       }
@@ -282,8 +417,18 @@ export const App = () => {
     setRequestingContact(true);
     try {
       const contact = await maxBridge.requestContact();
-      const phone = contact.phone.startsWith('+') ? contact.phone : `+${contact.phone}`;
-      session.setVerifiedContact({ phone, verifiedAt: new Date().toISOString() });
+      let phone: string;
+      if (shouldUseServer) {
+        if (runtimeStatus !== 'connected') {
+          throw new Error('The production session is not connected');
+        }
+        const verified = await serverApi.verifyContact(contact);
+        phone = verified.phone;
+        setServerVerifiedPhone(verified.phone);
+      } else {
+        phone = contact.phone.startsWith('+') ? contact.phone : `+${contact.phone}`;
+        session.setVerifiedContact({ phone, verifiedAt: new Date().toISOString() });
+      }
       setDraft((current) => ({
         ...current,
         contact: { ...current.contact, phone },
@@ -291,11 +436,15 @@ export const App = () => {
       setHasActiveDraft(true);
       setToast('Контакт получен из MAX');
     } catch {
-      setToast('MAX не передал контакт — введите номер вручную');
+      setToast(
+        shouldUseServer
+          ? 'Не удалось проверить контакт через MAX — введите номер вручную'
+          : 'MAX не передал контакт — введите номер вручную',
+      );
     } finally {
       setRequestingContact(false);
     }
-  }, [session]);
+  }, [runtimeStatus, serverApi, session, shouldUseServer]);
 
   const handleFinderDiscuss = useCallback(
     (recommendations: readonly ServiceRecommendation[]): void => {
@@ -344,19 +493,20 @@ export const App = () => {
   }, []);
 
   const finalForm = useMemo(() => safeFinalForm(draft), [draft]);
-  const phoneVerified = session.verifiedContact?.phone === draft.contact?.phone;
-  const documentNames = useMemo(
-    () =>
-      (draft.documentIds ?? []).flatMap((documentId) => {
-        try {
-          const document = uploadApi.getDocument(documentId);
-          return document === null ? [] : [document.originalName];
-        } catch {
-          return [];
-        }
-      }),
-    [draft.documentIds, uploadApi],
-  );
+  const phoneVerified =
+    (shouldUseServer ? serverVerifiedPhone : session.verifiedContact?.phone) ===
+    draft.contact?.phone;
+  const documentNames = useMemo(() => {
+    if (shouldUseServer) return [];
+    return (draft.documentIds ?? []).flatMap((documentId) => {
+      try {
+        const document = uploadApi.getDocument(documentId);
+        return document === null ? [] : [document.originalName];
+      } catch {
+        return [];
+      }
+    });
+  }, [draft.documentIds, shouldUseServer, uploadApi]);
 
   const handleSubmit = useCallback(async (): Promise<void> => {
     const form = safeFinalForm(draft);
@@ -364,32 +514,47 @@ export const App = () => {
       setSubmitError('Проверьте обязательные поля брифа. Введённые данные сохранены.');
       return;
     }
+    if (shouldUseServer && form.documentIds.length > 0) {
+      setSubmitError(
+        'Удалите демонстрационные файлы из черновика. На этапе 3 можно отправить HTTPS-ссылку.',
+      );
+      return;
+    }
 
     setSubmitError(undefined);
     setIsSubmitting(true);
     await Promise.resolve();
     try {
-      const stored = persistDraft(cleanDraftForValidation(draft), 17);
-      const response = submissionApi.createSubmission({
-        draftId: stored.id,
-        idempotencyKey: `stage2-${stored.id}`,
-        payload: form,
-      });
+      const stored = await persistDraft(cleanDraftForValidation(draft), 17);
+      const response = shouldUseServer
+        ? await serverApi.createSubmission({
+            draftId: stored.id,
+            idempotencyKey: `stage3:${stored.id}`,
+            payload: form,
+          })
+        : submissionApi.createSubmission({
+            draftId: stored.id,
+            idempotencyKey: `stage2-${stored.id}`,
+            payload: form,
+          });
       setSubmission(response.submission);
       draftRepository.clear();
       setSavedDraft(null);
       setHasActiveDraft(false);
-      setDraft(createEmptyDraft());
+      setDraft(createEmptyDraft(privacyConfiguration.consentVersion));
+      setServerVerifiedPhone(null);
       setBriefStep(1);
       navigate('success');
     } catch {
       setSubmitError(
-        'Mock API не принял заявку. Проверьте материалы или поля и повторите отправку.',
+        shouldUseServer
+          ? 'Сервер не принял заявку. Проверьте подключение и повторите отправку — дубликат не создастся.'
+          : 'Preview API не принял заявку. Проверьте материалы или поля и повторите отправку.',
       );
     } finally {
       setIsSubmitting(false);
     }
-  }, [draft, draftRepository, navigate, persistDraft, submissionApi]);
+  }, [draft, draftRepository, navigate, persistDraft, serverApi, shouldUseServer, submissionApi]);
 
   useEffect(() => {
     if (route === 'summary' && finalForm === null) {
@@ -419,6 +584,7 @@ export const App = () => {
     case 'brief':
       screen = (
         <BriefScreen
+          consentVersion={privacyConfiguration.consentVersion}
           draft={draft}
           isSaving={isSaving}
           materialCount={draft.documentIds?.length ?? 0}
@@ -430,7 +596,11 @@ export const App = () => {
           onRequestContact={handleRequestContact}
           onSaveAndExit={handleSaveAndExit}
           phoneVerified={phoneVerified}
+          {...(privacyConfiguration.productionDataEnabled && privacyConfiguration.policyUrl !== null
+            ? { privacyPolicyUrl: privacyConfiguration.policyUrl }
+            : {})}
           requestingContact={requestingContact}
+          serverBacked={runtimeStatus === 'connected'}
           step={briefStep}
         />
       );
@@ -450,6 +620,7 @@ export const App = () => {
         <UploadScreen
           description={draft.description ?? ''}
           documentIds={draft.documentIds ?? []}
+          fileUploadsEnabled={!shouldUseServer}
           onBack={handleBack}
           onDocumentAdded={handleDocumentAdded}
           onDocumentRemoved={handleDocumentRemoved}
@@ -483,6 +654,7 @@ export const App = () => {
             onEditStep={handleEditStep}
             onSubmit={handleSubmit}
             phoneVerified={phoneVerified}
+            serverBacked={runtimeStatus === 'connected'}
             {...(submitError === undefined ? {} : { submitError })}
           />
         );
@@ -494,7 +666,11 @@ export const App = () => {
         ) : (
           <SuccessScreen
             onAddMaterials={() => {
-              setToast('Открыт новый черновик — предыдущая mock-заявка не изменится');
+              setToast(
+                shouldUseServer
+                  ? 'Открыт новый черновик — отправленная заявка не изменится'
+                  : 'Открыт новый черновик — предыдущая preview-заявка не изменится',
+              );
               navigate('upload');
             }}
             onHome={() => navigate('home')}
@@ -506,23 +682,94 @@ export const App = () => {
         );
       break;
     case 'privacy':
-      screen = <PrivacyScreen onBack={handleBack} />;
+      screen = (
+        <PrivacyScreen
+          consentVersion={privacyConfiguration.consentVersion}
+          onBack={handleBack}
+          {...(shouldUseServer && !privacyAcknowledged
+            ? {
+                onContinue: () => {
+                  setPrivacyAcknowledged(true);
+                },
+              }
+            : {})}
+          {...(privacyConfiguration.productionDataEnabled && privacyConfiguration.policyUrl !== null
+            ? { policyUrl: privacyConfiguration.policyUrl }
+            : {})}
+          {...(termsUrl === null ? {} : { termsUrl })}
+        />
+      );
       break;
   }
 
-  const showNavigation = route === 'home' || route === 'cases';
+  if (runtimeStatus === 'awaiting-consent') {
+    screen = (
+      <PrivacyScreen
+        consentVersion={privacyConfiguration.consentVersion}
+        onBack={() => navigate('home')}
+        onContinue={() => setPrivacyAcknowledged(true)}
+        {...(privacyConfiguration.policyUrl === null
+          ? {}
+          : { policyUrl: privacyConfiguration.policyUrl })}
+        {...(termsUrl === null ? {} : { termsUrl })}
+      />
+    );
+  } else if (runtimeStatus === 'connecting') {
+    screen = <LoadingScreen label="Проверяем защищённую MAX-сессию…" />;
+  } else if (runtimeStatus === 'error') {
+    screen = <RuntimeUnavailableScreen />;
+  } else if (
+    runtimeStatus === 'connected' &&
+    !privacyAcknowledged &&
+    (route === 'brief' || route === 'summary' || route === 'upload')
+  ) {
+    screen = (
+      <PrivacyScreen
+        consentVersion={privacyConfiguration.consentVersion}
+        onBack={() => navigate('home')}
+        onContinue={() => setPrivacyAcknowledged(true)}
+        {...(privacyConfiguration.policyUrl === null
+          ? {}
+          : { policyUrl: privacyConfiguration.policyUrl })}
+        {...(termsUrl === null ? {} : { termsUrl })}
+      />
+    );
+  }
+
+  const showNavigation =
+    runtimeStatus !== 'awaiting-consent' &&
+    runtimeStatus !== 'connecting' &&
+    runtimeStatus !== 'error' &&
+    (route === 'home' || route === 'cases');
   const platform = maxBridge.getPlatform() === 'ios' ? 'ios' : 'android';
+  const runtimeLabel =
+    runtimeStatus === 'connected'
+      ? 'MAX · защищённая сессия'
+      : runtimeStatus === 'awaiting-consent'
+        ? 'MAX · ожидается согласие'
+        : runtimeStatus === 'connecting'
+          ? 'MAX · подключение'
+          : runtimeStatus === 'error'
+            ? 'MAX · сервер недоступен'
+            : maxBridge.isAvailable()
+              ? 'MAX · preview'
+              : 'Web preview';
+  const runtimeNotice =
+    runtimeStatus === 'connected'
+      ? 'Этап 3 · MAX-аутентификация, проверенный контакт и серверный черновик подключены'
+      : runtimeStatus === 'awaiting-consent'
+        ? 'До вашего согласия Mini App не отправляет MAX-профиль и данные на сервер'
+        : maxBridge.isAvailable() && !privacyConfiguration.productionDataEnabled
+          ? 'Без утверждённой политики персональные данные остаются только в preview-режиме'
+          : runtimeStatus === 'error'
+            ? 'Защищённое соединение не установлено · отправка данных заблокирована'
+            : 'Web preview · демонстрационные данные не отправляются во внешние системы';
 
   return (
     <MaxUI colorScheme={theme} platform={platform}>
       <div className="app" data-platform={maxBridge.getPlatform()}>
-        <AppTopbar
-          onNavigate={handleNavigation}
-          status={maxBridge.isAvailable() ? 'MAX Mini App' : 'Web preview'}
-        />
-        <div className="mock-ribbon">
-          Этап 2 · интерфейс работает на демонстрационных данных, без отправки во внешние системы
-        </div>
+        <AppTopbar onNavigate={handleNavigation} status={runtimeLabel} />
+        <div className="mock-ribbon">{runtimeNotice}</div>
         {screen}
         {showNavigation ? (
           <BottomNav activeRoute={activeNavigationRoute(route)} onNavigate={handleNavigation} />

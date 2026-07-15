@@ -107,6 +107,7 @@ export const sessions = pgTable(
   'sessions',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
     maxUserId: bigint('max_user_id', { mode: 'bigint' })
       .notNull()
       .references(() => maxUsers.maxUserId, {
@@ -117,14 +118,41 @@ export const sessions = pgTable(
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     verifiedPhone: varchar('verified_phone', { length: 16 }),
     phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
+    startParam: varchar('start_param', { length: 128 }),
+    consentVersion: varchar('consent_version', { length: 64 }).notNull(),
+    consentTextHash: varchar('consent_text_hash', { length: 64 }).notNull(),
+    consentClientAcceptedAt: timestamp('consent_client_accepted_at', {
+      withTimezone: true,
+    }).notNull(),
+    consentedAt: timestamp('consented_at', { withTimezone: true }).notNull(),
+    termsVersion: varchar('terms_version', { length: 64 }).notNull(),
+    termsTextHash: varchar('terms_text_hash', { length: 64 }).notNull(),
+    termsClientAcceptedAt: timestamp('terms_client_accepted_at', { withTimezone: true }).notNull(),
+    termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    unique('sessions_token_hash_unique').on(table.tokenHash),
     index('sessions_active_user_expiry_idx')
       .on(table.maxUserId, table.expiresAt)
       .where(sql`${table.revokedAt} is null`),
     index('sessions_expires_at_idx').on(table.expiresAt),
     check('sessions_expiry_after_creation', sql`${table.expiresAt} > ${table.createdAt}`),
+    check('sessions_token_hash_format', sql`${table.tokenHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'sessions_start_param_not_blank',
+      sql`${table.startParam} is null or char_length(btrim(${table.startParam})) > 0`,
+    ),
+    check(
+      'sessions_consent_version_format',
+      sql`${table.consentVersion} ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'`,
+    ),
+    check('sessions_consent_text_hash_format', sql`${table.consentTextHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'sessions_terms_version_format',
+      sql`${table.termsVersion} ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'`,
+    ),
+    check('sessions_terms_text_hash_format', sql`${table.termsTextHash} ~ '^[0-9a-f]{64}$'`),
     check(
       'sessions_revocation_after_creation',
       sql`${table.revokedAt} is null or ${table.revokedAt} >= ${table.createdAt}`,
@@ -160,6 +188,12 @@ export const leadDrafts = pgTable(
     currentStep: integer('current_step').default(1).notNull(),
     payload: jsonb('payload').$type<JsonObject>().default(emptyJsonObject).notNull(),
     source: varchar('source', { length: 128 }).default('direct').notNull(),
+    consentVersion: varchar('consent_version', { length: 64 }).notNull(),
+    consentTextHash: varchar('consent_text_hash', { length: 64 }).notNull(),
+    consentedAt: timestamp('consented_at', { withTimezone: true }).notNull(),
+    termsVersion: varchar('terms_version', { length: 64 }).notNull(),
+    termsTextHash: varchar('terms_text_hash', { length: 64 }).notNull(),
+    termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
@@ -172,6 +206,16 @@ export const leadDrafts = pgTable(
     index('lead_drafts_expires_at_idx').on(table.expiresAt),
     check('lead_drafts_current_step_range', sql`${table.currentStep} between 1 and 17`),
     check('lead_drafts_source_not_blank', sql`char_length(btrim(${table.source})) > 0`),
+    check(
+      'lead_drafts_consent_version_format',
+      sql`${table.consentVersion} ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'`,
+    ),
+    check('lead_drafts_consent_text_hash_format', sql`${table.consentTextHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'lead_drafts_terms_version_format',
+      sql`${table.termsVersion} ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'`,
+    ),
+    check('lead_drafts_terms_text_hash_format', sql`${table.termsTextHash} ~ '^[0-9a-f]{64}$'`),
     check('lead_drafts_expiry_after_creation', sql`${table.expiresAt} > ${table.createdAt}`),
   ],
 );
@@ -182,6 +226,7 @@ export const submissions = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     submissionId: varchar('submission_id', { length: 64 }).notNull(),
     idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull(),
+    requestHash: varchar('request_hash', { length: 64 }).notNull(),
     maxUserId: bigint('max_user_id', { mode: 'bigint' })
       .notNull()
       .references(() => maxUsers.maxUserId, {
@@ -210,7 +255,11 @@ export const submissions = pgTable(
     phoneVerified: boolean('phone_verified').default(false).notNull(),
     email: varchar('email', { length: 320 }).notNull(),
     consentVersion: varchar('consent_version', { length: 64 }).notNull(),
+    consentTextHash: varchar('consent_text_hash', { length: 64 }).notNull(),
     consentedAt: timestamp('consented_at', { withTimezone: true }).notNull(),
+    termsVersion: varchar('terms_version', { length: 64 }).notNull(),
+    termsTextHash: varchar('terms_text_hash', { length: 64 }).notNull(),
+    termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }).notNull(),
     source: varchar('source', { length: 128 }).default('direct').notNull(),
     status: submissionStatusEnum('status').default('received').notNull(),
     trackerCrmKey: varchar('tracker_crm_key', { length: 64 }),
@@ -247,6 +296,13 @@ export const submissions = pgTable(
       'submissions_idempotency_key_format',
       sql`${table.idempotencyKey} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$'`,
     ),
+    check('submissions_request_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+    check('submissions_consent_text_hash_format', sql`${table.consentTextHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'submissions_terms_version_format',
+      sql`${table.termsVersion} ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'`,
+    ),
+    check('submissions_terms_text_hash_format', sql`${table.termsTextHash} ~ '^[0-9a-f]{64}$'`),
     check('submissions_contact_name_not_blank', sql`char_length(btrim(${table.contactName})) > 0`),
     check(
       'submissions_location_present',

@@ -47,5 +47,22 @@ export default tseslint.config(
       globals: globals.vitest,
     },
   },
+  {
+    files: ['deploy/**/*.mjs'],
+    languageOptions: {
+      globals: globals.node,
+      sourceType: 'module',
+    },
+  },
+  {
+    files: ['deploy/**/*.cjs'],
+    languageOptions: {
+      globals: globals.node,
+      sourceType: 'commonjs',
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
   eslintConfigPrettier,
 );

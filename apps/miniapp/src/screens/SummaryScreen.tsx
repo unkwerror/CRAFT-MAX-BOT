@@ -58,6 +58,7 @@ function buildSummarySections(
   form: LeadFormData,
   documentNames: readonly string[],
   phoneVerified: boolean,
+  serverBacked: boolean,
 ): readonly SummarySection[] {
   return [
     {
@@ -136,7 +137,11 @@ function buildSummarySections(
         { label: 'Телефон', value: form.contact.phone },
         {
           label: 'Статус телефона',
-          value: phoneVerified ? 'Получен через MAX · mock' : 'Указан вручную',
+          value: phoneVerified
+            ? serverBacked
+              ? 'Получен через MAX · подпись проверена'
+              : 'Получен через MAX · web preview'
+            : 'Указан вручную',
         },
         { label: 'Email', value: form.contact.email },
       ],
@@ -183,6 +188,7 @@ export interface SummaryScreenProps {
   readonly onEditStep: (step: BriefStep) => void;
   readonly onSubmit: () => void | Promise<void>;
   readonly phoneVerified?: boolean;
+  readonly serverBacked?: boolean;
   readonly submitError?: string;
 }
 
@@ -194,9 +200,10 @@ export const SummaryScreen = ({
   onEditStep,
   onSubmit,
   phoneVerified = false,
+  serverBacked = false,
   submitError,
 }: SummaryScreenProps) => {
-  const sections = buildSummarySections(form, documentNames, phoneVerified);
+  const sections = buildSummarySections(form, documentNames, phoneVerified, serverBacked);
 
   return (
     <Page className="page--narrow">

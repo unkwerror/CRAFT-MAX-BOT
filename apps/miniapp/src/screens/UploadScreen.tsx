@@ -66,6 +66,7 @@ type FilePreparation =
 export interface UploadScreenProps {
   readonly description?: string;
   readonly documentIds: readonly string[];
+  readonly fileUploadsEnabled?: boolean;
   readonly onBack?: () => void;
   readonly onDocumentAdded: (documentId: string) => void;
   readonly onDocumentRemoved?: (documentId: string) => void;
@@ -265,6 +266,7 @@ const FileRow = (props: FileRowProps) => {
 export const UploadScreen = ({
   description = '',
   documentIds,
+  fileUploadsEnabled = true,
   onBack,
   onDocumentAdded,
   onDocumentRemoved,
@@ -327,6 +329,10 @@ export const UploadScreen = ({
 
   const addFiles = useCallback(
     (fileList: FileList | readonly File[]) => {
+      if (!fileUploadsEnabled) {
+        onToast?.('Загрузка файлов будет доступна после подключения защищённого хранилища');
+        return;
+      }
       const selectedFiles = Array.from(fileList);
       if (selectedFiles.length === 0) return;
 
@@ -371,7 +377,7 @@ export const UploadScreen = ({
         }
       })();
     },
-    [documentIds, items, onToast, processItem],
+    [documentIds, fileUploadsEnabled, items, onToast, processItem],
   );
 
   const localDocumentIds = useMemo(
@@ -469,10 +475,13 @@ export const UploadScreen = ({
           title="Загрузка файлов"
         />
 
-        <InlineNotice icon="shield">
-          <strong>Демонстрационная загрузка</strong>
-          На этапе 2 сохраняются только mock-метаданные файла; production-хранилище подключается
-          отдельно.
+        <InlineNotice icon="shield" {...(fileUploadsEnabled ? {} : { tone: 'warning' })}>
+          <strong>
+            {fileUploadsEnabled ? 'Демонстрационная загрузка' : 'Файловое хранилище подключается'}
+          </strong>
+          {fileUploadsEnabled
+            ? 'В web preview сохраняются только mock-метаданные файла.'
+            : 'В production-режиме этапа 3 файлы не передаются на сервер. Добавьте HTTPS-ссылку на защищённое облако.'}
         </InlineNotice>
 
         <section aria-labelledby="upload-heading" className="form-card">
@@ -485,17 +494,19 @@ export const UploadScreen = ({
           </p>
 
           <label
-            className={isDragging ? 'dropzone is-dragging' : 'dropzone'}
+            aria-disabled={!fileUploadsEnabled}
+            className={`${isDragging ? 'dropzone is-dragging' : 'dropzone'}${fileUploadsEnabled ? '' : ' is-disabled'}`}
             onDragEnter={handleDragEnter}
             onDragLeave={handleDragLeave}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             onKeyDown={handleDropzoneKeyDown}
-            tabIndex={0}
+            tabIndex={fileUploadsEnabled ? 0 : -1}
           >
             <input
               accept={ACCEPTED_FILE_TYPES}
               aria-label="Выбрать файлы"
+              disabled={!fileUploadsEnabled}
               multiple
               onChange={handleChange}
               ref={inputRef}

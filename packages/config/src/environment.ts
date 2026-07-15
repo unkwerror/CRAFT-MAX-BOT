@@ -21,9 +21,15 @@ const concreteString = (name: string, minimumLength = 1) =>
     .min(minimumLength, `${name} is required`)
     .refine((value) => !containsPlaceholder(value), `${name} must not contain a placeholder`);
 
-const httpsUrl = z
-  .url()
-  .refine((value) => new URL(value).protocol === 'https:', 'Production endpoints must use HTTPS');
+const hasHttpsProtocol = (value: string): boolean => {
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+const httpsUrl = z.url().refine(hasHttpsProtocol, 'Production endpoints must use HTTPS');
 
 const booleanFromEnvironment = z
   .union([z.boolean(), z.enum(['true', 'false'])])
@@ -35,6 +41,16 @@ export const serverEnvironmentSchema = z
     API_HOST: z.ipv4().default('127.0.0.1'),
     API_PORT: z.coerce.number().int().min(1024).max(65_535),
     PUBLIC_BASE_URL: z.url(),
+    PRIVACY_POLICY_URL: z
+      .url()
+      .refine(hasHttpsProtocol, 'Privacy policy must use HTTPS')
+      .refine(
+        (value) => !containsPlaceholder(value),
+        'PRIVACY_POLICY_URL must not contain placeholders',
+      ),
+    CONSENT_VERSION: concreteString('CONSENT_VERSION')
+      .max(64)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'CONSENT_VERSION has an invalid format'),
     MAX_API_BASE_URL: z
       .url()
       .refine(
@@ -44,6 +60,23 @@ export const serverEnvironmentSchema = z
     MAX_BOT_TOKEN: concreteString('MAX_BOT_TOKEN', 16),
     MAX_WEBHOOK_SECRET: concreteString('MAX_WEBHOOK_SECRET', 32),
     MAX_INIT_DATA_MAX_AGE_SECONDS: z.coerce.number().int().positive().max(3_600),
+    MAX_CONTACT_MAX_AGE_SECONDS: z.coerce.number().int().positive().max(3_600).default(300),
+    SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(3_600),
+    DRAFT_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(3_600)
+      .max(90 * 24 * 60 * 60)
+      .default(30 * 24 * 60 * 60),
+    SUBMISSION_RETENTION_DAYS: z.coerce.number().int().min(30).max(1_095).default(1_095),
+    RETENTION_CLEANUP_INTERVAL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(300)
+      .max(86_400)
+      .default(21_600),
+    API_RATE_LIMIT_MAX: z.coerce.number().int().min(10).max(1_000).default(120),
+    API_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3_600).default(60),
     DATABASE_URL: z
       .url()
       .refine(
@@ -51,6 +84,9 @@ export const serverEnvironmentSchema = z
         'DATABASE_URL must be a PostgreSQL URL',
       )
       .refine((value) => !containsPlaceholder(value), 'DATABASE_URL must not contain placeholders'),
+    DB_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
+    DB_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(5_000),
+    DB_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(10_000),
     TRACKER_API_BASE_URL: z
       .url()
       .refine(
@@ -83,6 +119,9 @@ export const serverEnvironmentSchema = z
         'UPLOAD_STORAGE_PATH must not contain parent-directory segments',
       ),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+    LOG_RETENTION_DAYS: z.coerce.number().int().min(1).max(90).default(90),
+    BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(30).default(30),
+    SHUTDOWN_GRACE_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
   })
   .superRefine((environment, context) => {
     if (environment.NODE_ENV !== 'production') {
@@ -91,6 +130,7 @@ export const serverEnvironmentSchema = z
 
     for (const [key, value] of [
       ['PUBLIC_BASE_URL', environment.PUBLIC_BASE_URL],
+      ['PRIVACY_POLICY_URL', environment.PRIVACY_POLICY_URL],
       ['TRACKER_API_BASE_URL', environment.TRACKER_API_BASE_URL],
       ['MAX_API_BASE_URL', environment.MAX_API_BASE_URL],
     ] as const) {

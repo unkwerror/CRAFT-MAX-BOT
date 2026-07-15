@@ -1,11 +1,27 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+interface MigrationJournalEntry {
+  idx: number;
+  version: string;
+  when: number;
+  tag: string;
+  breakpoints: boolean;
+}
+
+interface MigrationJournal {
+  version: string;
+  dialect: string;
+  entries: MigrationJournalEntry[];
+}
 
 const databaseUrl = process.env.DATABASE_URL;
 const destructiveTestEnabled = process.env.MIGRATION_TEST_ALLOW_DESTRUCTIVE === 'true';
@@ -14,27 +30,74 @@ const describeWithDatabase =
 const migrationFolder = fileURLToPath(new URL('../drizzle', import.meta.url));
 const migrationJournal = JSON.parse(
   readFileSync(new URL('../drizzle/meta/_journal.json', import.meta.url), 'utf8'),
-) as { entries: [{ when: number }] };
-const migrationTimestamp = String(migrationJournal.entries[0].when);
-const migrationSql = readFileSync(new URL('../drizzle/0000_initial.sql', import.meta.url), 'utf8');
-const migrationHash = createHash('sha256').update(migrationSql).digest('hex');
-const downMigration = readFileSync(
+) as MigrationJournal;
+
+const initialEntry = migrationJournal.entries.find(({ tag }) => tag === '0000_initial');
+const runtimeEntry = migrationJournal.entries.find(({ tag }) => tag === '0001_stage3_runtime');
+
+if (initialEntry === undefined || runtimeEntry === undefined) {
+  throw new Error('Expected 0000_initial and 0001_stage3_runtime migration journal entries');
+}
+
+const initialSqlUrl = new URL('../drizzle/0000_initial.sql', import.meta.url);
+const runtimeSqlUrl = new URL('../drizzle/0001_stage3_runtime.sql', import.meta.url);
+const initialMigrationSql = readFileSync(initialSqlUrl, 'utf8');
+const runtimeMigrationSql = readFileSync(runtimeSqlUrl, 'utf8');
+const initialMigrationHash = createHash('sha256').update(initialMigrationSql).digest('hex');
+const runtimeMigrationHash = createHash('sha256').update(runtimeMigrationSql).digest('hex');
+const initialDownMigration = readFileSync(
   new URL('../drizzle/rollback/0000_initial.down.sql', import.meta.url),
   'utf8',
 );
+const runtimeDownMigration = readFileSync(
+  new URL('../drizzle/rollback/0001_stage3_runtime.down.sql', import.meta.url),
+  'utf8',
+);
+const sessionEvidenceColumns = `
+  "consent_version", "consent_text_hash", "consent_client_accepted_at", "consented_at",
+  "terms_version", "terms_text_hash", "terms_client_accepted_at", "terms_accepted_at"`;
+const sessionEvidenceValues = `
+  'test-v1', repeat('e', 64), now(), now(),
+  'test-v1', repeat('f', 64), now(), now()`;
+const submissionEvidenceColumns = `
+  "consent_text_hash", "terms_version", "terms_text_hash", "terms_accepted_at"`;
+const submissionEvidenceValues = `
+  repeat('a', 64), 'test-v1', repeat('b', 64), now()`;
+
+function makeInitialMigrationFolder(): string {
+  const directory = mkdtempSync(join(tmpdir(), 'craft72-initial-migration-'));
+  const metaDirectory = join(directory, 'meta');
+  mkdirSync(metaDirectory);
+  copyFileSync(fileURLToPath(initialSqlUrl), join(directory, '0000_initial.sql'));
+  writeFileSync(
+    join(metaDirectory, '_journal.json'),
+    `${JSON.stringify({ ...migrationJournal, entries: [initialEntry] }, undefined, 2)}\n`,
+  );
+  return directory;
+}
 
 describe('migration rollback metadata', () => {
-  it('targets the generated initial migration ledger entry', () => {
-    expect(downMigration).toContain(`WHERE "created_at" = ${migrationTimestamp}`);
-    expect(downMigration).toContain(`AND "hash" = '${migrationHash}'`);
-    expect(downMigration).toContain(
+  it('anchors the initial rollback to its generated migration ledger entry', () => {
+    expect(initialDownMigration).toContain(`WHERE "created_at" = ${initialEntry.when}`);
+    expect(initialDownMigration).toContain(`AND "hash" = '${initialMigrationHash}'`);
+    expect(initialDownMigration).toContain(
       'Initial rollback refused: unexpected migration ledger entries exist',
+    );
+  });
+
+  it('anchors the Stage 3 rollback to both known migrations and refuses newer entries', () => {
+    expect(runtimeDownMigration).toContain(`WHERE "created_at" = ${initialEntry.when}`);
+    expect(runtimeDownMigration).toContain(`AND "hash" = '${initialMigrationHash}'`);
+    expect(runtimeDownMigration).toContain(`WHERE "created_at" = ${runtimeEntry.when}`);
+    expect(runtimeDownMigration).toContain(`AND "hash" = '${runtimeMigrationHash}'`);
+    expect(runtimeDownMigration).toContain(
+      'Stage 3 rollback refused: unexpected migration ledger entries exist',
     );
   });
 });
 
 describeWithDatabase('PostgreSQL migrations', () => {
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
 
   beforeAll(async () => {
     if (databaseUrl === undefined) {
@@ -53,8 +116,43 @@ describeWithDatabase('PostgreSQL migrations', () => {
     await pool.end();
   });
 
-  it('applies the Drizzle migration and rolls back schema and ledger atomically', async () => {
+  it('upgrades 0000 data through 0001, enforces Stage 3 constraints and rolls back safely', async () => {
     const database = drizzle(pool);
+    const initialMigrationFolder = makeInitialMigrationFolder();
+
+    try {
+      await migrate(database, { migrationsFolder: initialMigrationFolder });
+    } finally {
+      rmSync(initialMigrationFolder, { force: true, recursive: true });
+    }
+
+    const maxUserId = '900000000000000001';
+    await pool.query(
+      `insert into "public"."max_users" ("max_user_id", "first_name")
+       values ($1, $2)`,
+      [maxUserId, 'Migration test user'],
+    );
+    const legacySession = await pool.query<{ id: string }>(
+      `insert into "public"."sessions" ("max_user_id", "expires_at")
+       values ($1, now() + interval '1 hour')
+       returning "id"`,
+      [maxUserId],
+    );
+    const legacySubmission = await pool.query<{ id: string }>(
+      `insert into "public"."submissions" (
+         "submission_id", "idempotency_key", "max_user_id", "customer_role",
+         "contact_name", "object_type", "city", "project_scope", "object_count",
+         "project_stage", "services", "description", "phone", "email",
+         "consent_version", "consented_at"
+       ) values (
+         'TEST-0001', 'request:0001', $1, 'developer',
+         'Migration test user', 'Office', 'Tyumen', 'single_object', 1,
+         'Concept', ARRAY['design'], 'Legacy submission', '+79991234567',
+         'migration@example.test', 'test-v1', now()
+       )
+       returning "id"`,
+      [maxUserId],
+    );
 
     await migrate(database, { migrationsFolder: migrationFolder });
 
@@ -76,7 +174,6 @@ describeWithDatabase('PostgreSQL migrations', () => {
         ],
       ],
     );
-
     expect(createdTables.rows.map(({ table_name: tableName }) => tableName)).toEqual([
       'documents',
       'integration_outbox',
@@ -87,86 +184,275 @@ describeWithDatabase('PostgreSQL migrations', () => {
       'webhook_inbox',
     ]);
 
-    const sessionContactColumns = await pool.query<{ column_name: string }>(
-      `select column_name
+    const stageThreeColumns = await pool.query<{
+      table_name: string;
+      column_name: string;
+      is_nullable: 'NO' | 'YES';
+      character_maximum_length: number;
+    }>(
+      `select table_name, column_name, is_nullable, character_maximum_length
+         from information_schema.columns
+        where table_schema = 'public'
+          and (table_name, column_name) in (
+            ('sessions', 'token_hash'),
+            ('sessions', 'start_param'),
+            ('submissions', 'request_hash')
+          )
+        order by table_name, ordinal_position`,
+    );
+    expect(stageThreeColumns.rows).toEqual([
+      {
+        table_name: 'sessions',
+        column_name: 'token_hash',
+        is_nullable: 'NO',
+        character_maximum_length: 64,
+      },
+      {
+        table_name: 'sessions',
+        column_name: 'start_param',
+        is_nullable: 'YES',
+        character_maximum_length: 128,
+      },
+      {
+        table_name: 'submissions',
+        column_name: 'request_hash',
+        is_nullable: 'NO',
+        character_maximum_length: 64,
+      },
+    ]);
+
+    const consentColumns = await pool.query<{
+      column_name: string;
+      is_nullable: 'NO' | 'YES';
+    }>(
+      `select column_name, is_nullable
          from information_schema.columns
         where table_schema = 'public'
           and table_name = 'sessions'
           and column_name = any($1::text[])
-        order by column_name`,
-      [['phone_verified_at', 'verified_phone']],
+        order by ordinal_position`,
+      [
+        [
+          'consent_version',
+          'consent_text_hash',
+          'consent_client_accepted_at',
+          'consented_at',
+          'terms_version',
+          'terms_text_hash',
+          'terms_client_accepted_at',
+          'terms_accepted_at',
+        ],
+      ],
     );
-    expect(sessionContactColumns.rows.map(({ column_name: columnName }) => columnName)).toEqual([
-      'phone_verified_at',
-      'verified_phone',
+    expect(consentColumns.rows).toEqual([
+      { column_name: 'consent_version', is_nullable: 'NO' },
+      { column_name: 'consent_text_hash', is_nullable: 'NO' },
+      { column_name: 'consent_client_accepted_at', is_nullable: 'NO' },
+      { column_name: 'consented_at', is_nullable: 'NO' },
+      { column_name: 'terms_version', is_nullable: 'NO' },
+      { column_name: 'terms_text_hash', is_nullable: 'NO' },
+      { column_name: 'terms_client_accepted_at', is_nullable: 'NO' },
+      { column_name: 'terms_accepted_at', is_nullable: 'NO' },
     ]);
 
-    const maxUserId = '900000000000000001';
-    await pool.query(
-      `insert into "public"."max_users" ("max_user_id", "first_name")
-       values ($1, $2)`,
-      [maxUserId, 'Migration test user'],
+    const stageThreeConstraints = await pool.query<{ conname: string }>(
+      `select constraint_definition.conname
+         from pg_constraint as constraint_definition
+         join pg_class as relation on relation.oid = constraint_definition.conrelid
+         join pg_namespace as namespace on namespace.oid = relation.relnamespace
+        where namespace.nspname = 'public'
+          and relation.relname = any($1::text[])
+          and constraint_definition.conname = any($2::text[])
+        order by constraint_definition.conname`,
+      [
+        ['lead_drafts', 'sessions', 'submissions'],
+        [
+          'lead_drafts_consent_text_hash_format',
+          'lead_drafts_consent_version_format',
+          'lead_drafts_terms_text_hash_format',
+          'lead_drafts_terms_version_format',
+          'sessions_start_param_not_blank',
+          'sessions_consent_text_hash_format',
+          'sessions_consent_version_format',
+          'sessions_terms_text_hash_format',
+          'sessions_terms_version_format',
+          'sessions_token_hash_format',
+          'sessions_token_hash_unique',
+          'submissions_request_hash_format',
+          'submissions_consent_text_hash_format',
+          'submissions_terms_text_hash_format',
+          'submissions_terms_version_format',
+        ],
+      ],
     );
+    expect(stageThreeConstraints.rows.map(({ conname }) => conname)).toEqual([
+      'lead_drafts_consent_text_hash_format',
+      'lead_drafts_consent_version_format',
+      'lead_drafts_terms_text_hash_format',
+      'lead_drafts_terms_version_format',
+      'sessions_consent_text_hash_format',
+      'sessions_consent_version_format',
+      'sessions_start_param_not_blank',
+      'sessions_terms_text_hash_format',
+      'sessions_terms_version_format',
+      'sessions_token_hash_format',
+      'sessions_token_hash_unique',
+      'submissions_consent_text_hash_format',
+      'submissions_request_hash_format',
+      'submissions_terms_text_hash_format',
+      'submissions_terms_version_format',
+    ]);
+
+    const backfilledSession = await pool.query<{ consent_version: string; token_hash: string }>(
+      `select "token_hash", "consent_version"
+         from "public"."sessions"
+        where "id" = $1`,
+      [legacySession.rows[0]?.id],
+    );
+    const backfilledSubmission = await pool.query<{ request_hash: string }>(
+      `select "request_hash"
+         from "public"."submissions"
+        where "id" = $1`,
+      [legacySubmission.rows[0]?.id],
+    );
+    expect(backfilledSession.rows[0]?.token_hash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(backfilledSession.rows[0]?.consent_version).toBe('legacy-session-without-consent');
+    expect(backfilledSubmission.rows[0]?.request_hash).toMatch(/^[0-9a-f]{64}$/u);
+
     await expect(
       pool.query(
-        `insert into "public"."sessions" ("max_user_id", "expires_at", "verified_phone")
-         values ($1, now() + interval '1 hour', $2)`,
-        [maxUserId, '+79991234567'],
+        `insert into "public"."sessions"
+           ("token_hash", "max_user_id", "expires_at", "verified_phone", ${sessionEvidenceColumns})
+         values ($1, $2, now() + interval '1 hour', $3, ${sessionEvidenceValues})`,
+        ['a'.repeat(64), maxUserId, '+79991234567'],
       ),
     ).rejects.toThrow();
     const verifiedSession = await pool.query<{ verified_phone: string }>(
       `insert into "public"."sessions"
-         ("max_user_id", "expires_at", "verified_phone", "phone_verified_at")
-       values ($1, now() + interval '1 hour', $2, now())
+         ("token_hash", "max_user_id", "expires_at", "verified_phone", "phone_verified_at",
+          ${sessionEvidenceColumns})
+       values ($1, $2, now() + interval '1 hour', $3, now(), ${sessionEvidenceValues})
        returning "verified_phone"`,
-      [maxUserId, '+79991234567'],
+      ['b'.repeat(64), maxUserId, '+79991234567'],
     );
     expect(verifiedSession.rows[0]?.verified_phone).toBe('+79991234567');
+    await expect(
+      pool.query(
+        `insert into "public"."sessions"
+           ("token_hash", "max_user_id", "expires_at", ${sessionEvidenceColumns})
+         values ($1, $2, now() + interval '1 hour', ${sessionEvidenceValues})`,
+        ['b'.repeat(64), maxUserId],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool.query(
+        `insert into "public"."sessions"
+           ("token_hash", "max_user_id", "expires_at", "start_param", ${sessionEvidenceColumns})
+         values ($1, $2, now() + interval '1 hour', '   ', ${sessionEvidenceValues})`,
+        ['c'.repeat(64), maxUserId],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool.query(
+        `insert into "public"."sessions"
+           ("token_hash", "max_user_id", "expires_at", ${sessionEvidenceColumns})
+         values ('not-a-sha256', $1, now() + interval '1 hour', ${sessionEvidenceValues})`,
+        [maxUserId],
+      ),
+    ).rejects.toThrow();
 
-    const appliedLedgerRows = await pool.query<{ count: string }>(
-      `select count(*)::text as count
-         from "drizzle"."__drizzle_migrations"
-        where "created_at" = $1`,
-      [migrationTimestamp],
+    await expect(
+      pool.query(
+        `insert into "public"."submissions" (
+           "submission_id", "idempotency_key", "request_hash", "max_user_id",
+           "customer_role", "contact_name", "object_type", "city", "project_scope",
+           "object_count", "project_stage", "services", "description", "phone",
+           "email", "consent_version", "consented_at", ${submissionEvidenceColumns}
+         ) values (
+           'TEST-0002', 'request:0002', 'not-a-sha256', $1,
+           'developer', 'Migration test user', 'Office', 'Tyumen', 'single_object',
+           1, 'Concept', ARRAY['design'], 'Invalid hash submission', '+79991234567',
+           'migration@example.test', 'test-v1', now(), ${submissionEvidenceValues}
+         )`,
+        [maxUserId],
+      ),
+    ).rejects.toThrow();
+    const validSubmission = await pool.query<{ request_hash: string }>(
+      `insert into "public"."submissions" (
+         "submission_id", "idempotency_key", "request_hash", "max_user_id",
+         "customer_role", "contact_name", "object_type", "city", "project_scope",
+         "object_count", "project_stage", "services", "description", "phone",
+         "email", "consent_version", "consented_at", ${submissionEvidenceColumns}
+       ) values (
+         'TEST-0003', 'request:0003', $1, $2,
+         'developer', 'Migration test user', 'Office', 'Tyumen', 'single_object',
+         1, 'Concept', ARRAY['design'], 'Valid hash submission', '+79991234567',
+         'migration@example.test', 'test-v1', now(), ${submissionEvidenceValues}
+       )
+       returning "request_hash"`,
+      ['d'.repeat(64), maxUserId],
     );
-    expect(appliedLedgerRows.rows[0]?.count).toBe('1');
+    expect(validSubmission.rows[0]?.request_hash).toBe('d'.repeat(64));
+
+    const appliedLedgerRows = await pool.query<{ created_at: string; hash: string }>(
+      `select "created_at"::text as "created_at", "hash"
+         from "drizzle"."__drizzle_migrations"
+        order by "created_at"`,
+    );
+    expect(appliedLedgerRows.rows).toEqual([
+      { created_at: String(initialEntry.when), hash: initialMigrationHash },
+      { created_at: String(runtimeEntry.when), hash: runtimeMigrationHash },
+    ]);
+
+    await expect(pool.query(initialDownMigration)).rejects.toThrow(
+      /unexpected migration ledger entries exist/u,
+    );
+    await pool.query('rollback');
 
     await pool.query(
       `insert into "drizzle"."__drizzle_migrations" ("hash", "created_at")
        values ($1, $2)`,
-      ['future-migration-test-entry', Number(migrationTimestamp) + 1],
+      ['future-migration-test-entry', runtimeEntry.when + 1],
     );
-
-    await expect(pool.query(downMigration)).rejects.toThrow(
-      /unexpected migration ledger entries exist/,
+    await expect(pool.query(runtimeDownMigration)).rejects.toThrow(
+      /unexpected migration ledger entries exist/u,
     );
-
-    const tablesAfterRefusedRollback = await pool.query<{ count: string }>(
-      `select count(*)::text as count
-         from information_schema.tables
-        where table_schema = 'public'
-          and table_name = any($1::text[])`,
-      [
-        [
-          'documents',
-          'integration_outbox',
-          'lead_drafts',
-          'max_users',
-          'sessions',
-          'submissions',
-          'webhook_inbox',
-        ],
-      ],
-    );
-    expect(tablesAfterRefusedRollback.rows[0]?.count).toBe('7');
-
+    await pool.query('rollback');
     await pool.query(
       `delete from "drizzle"."__drizzle_migrations"
         where "created_at" = $1`,
-      [Number(migrationTimestamp) + 1],
+      [runtimeEntry.when + 1],
     );
 
-    await pool.query(downMigration);
+    await pool.query(runtimeDownMigration);
+
+    const runtimeColumnsAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from information_schema.columns
+        where table_schema = 'public'
+          and (table_name, column_name) in (
+            ('sessions', 'token_hash'),
+            ('sessions', 'start_param'),
+            ('submissions', 'request_hash')
+          )`,
+    );
+    const runtimeLedgerAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from "drizzle"."__drizzle_migrations"
+        where "created_at" = $1`,
+      [runtimeEntry.when],
+    );
+    const initialLedgerAfterRuntimeRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from "drizzle"."__drizzle_migrations"
+        where "created_at" = $1`,
+      [initialEntry.when],
+    );
+    expect(runtimeColumnsAfterRollback.rows[0]?.count).toBe('0');
+    expect(runtimeLedgerAfterRollback.rows[0]?.count).toBe('0');
+    expect(initialLedgerAfterRuntimeRollback.rows[0]?.count).toBe('1');
+
+    await pool.query(initialDownMigration);
 
     const remainingTables = await pool.query<{ count: string }>(
       `select count(*)::text as count
@@ -188,8 +474,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
     const remainingLedgerRows = await pool.query<{ count: string }>(
       `select count(*)::text as count
          from "drizzle"."__drizzle_migrations"
-        where "created_at" = $1`,
-      [migrationTimestamp],
+        where "created_at" = any($1::bigint[])`,
+      [[initialEntry.when, runtimeEntry.when]],
     );
     const remainingEnums = await pool.query<{ count: string }>(
       `select count(*)::text as count

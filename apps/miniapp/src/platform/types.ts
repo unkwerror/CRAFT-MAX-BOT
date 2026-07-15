@@ -78,6 +78,7 @@ export interface MaxBackButtonAdapter {
 export interface MaxBridgeAdapter {
   readonly backButton: MaxBackButtonAdapter;
   isAvailable(): boolean;
+  getInitData(): string | null;
   getPlatform(): MaxPlatform;
   getTheme(): MaxTheme;
   subscribeTheme(callback: (theme: MaxTheme) => void): Unsubscribe;

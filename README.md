@@ -4,17 +4,18 @@ TypeScript monorepo for the CRAFT72 MAX bot, Mini App, API and durable integrati
 
 ## Current scope
 
-Stage 1 repository boundaries and contracts are complete. Stage 2 adds a mobile-first React/Vite
-Mini App backed by deterministic browser mocks; it does not yet authenticate MAX `initData`,
-register a webhook or write to Yandex Tracker. Production credentials stay server-side and are not
-included in the static browser bundle.
+Stage 3 adds the production Fastify API, signed MAX `initData` authentication, verified contacts,
+server-owned drafts and submissions, PostgreSQL migrations, consent evidence and manual atomic
+deployment. A normal browser keeps a deterministic local preview; production credentials remain
+server-side and are never included in the browser bundle. Bot/webhook delivery and Tracker outbox
+processing follow in Stage 4.
 
 Workspace layout:
 
 ```text
 apps/
-  api/          Fastify API and MAX webhook runtime (Stage 3+)
-  miniapp/      React/Vite MAX Mini App (Stage 2+)
+  api/          Fastify API and signed MAX runtime (Stage 3+)
+  miniapp/      React/Vite MAX Mini App and browser preview
   worker/       PostgreSQL outbox worker (Stage 4+)
 packages/
   config/       Validated server configuration

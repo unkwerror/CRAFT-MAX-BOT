@@ -76,6 +76,72 @@ describe('database schema', () => {
     expect(checks).toContain('sessions_phone_verification_within_lifetime');
   });
 
+  it('stores only hashed session credentials and an optional non-blank MAX start parameter', () => {
+    const config = getTableConfig(sessions);
+    const checks = config.checks.map(({ name }) => name);
+    const uniqueConstraints = config.uniqueConstraints.map(({ name }) => name);
+
+    expect(sessions.tokenHash.name).toBe('token_hash');
+    expect(sessions.tokenHash.notNull).toBe(true);
+    expect(sessions.tokenHash.getSQLType()).toBe('varchar(64)');
+    expect(sessions.startParam.name).toBe('start_param');
+    expect(sessions.startParam.notNull).toBe(false);
+    expect(sessions.startParam.getSQLType()).toBe('varchar(128)');
+    expect(uniqueConstraints).toContain('sessions_token_hash_unique');
+    expect(checks).toContain('sessions_token_hash_format');
+    expect(checks).toContain('sessions_start_param_not_blank');
+  });
+
+  it('stores separate, timestamped evidence for privacy consent and terms acceptance', () => {
+    const sessionChecks = getTableConfig(sessions).checks.map(({ name }) => name);
+    const draftChecks = getTableConfig(leadDrafts).checks.map(({ name }) => name);
+    const submissionChecks = getTableConfig(submissions).checks.map(({ name }) => name);
+
+    expect(sessions.consentVersion.notNull).toBe(true);
+    expect(sessions.consentTextHash.notNull).toBe(true);
+    expect(sessions.consentClientAcceptedAt.notNull).toBe(true);
+    expect(sessions.consentedAt.notNull).toBe(true);
+    expect(sessions.termsVersion.notNull).toBe(true);
+    expect(sessions.termsTextHash.notNull).toBe(true);
+    expect(sessions.termsClientAcceptedAt.notNull).toBe(true);
+    expect(sessions.termsAcceptedAt.notNull).toBe(true);
+    expect(sessionChecks).toContain('sessions_consent_version_format');
+    expect(sessionChecks).toContain('sessions_consent_text_hash_format');
+    expect(sessionChecks).toContain('sessions_terms_version_format');
+    expect(sessionChecks).toContain('sessions_terms_text_hash_format');
+
+    for (const column of [
+      leadDrafts.consentVersion,
+      leadDrafts.consentTextHash,
+      leadDrafts.consentedAt,
+      leadDrafts.termsVersion,
+      leadDrafts.termsTextHash,
+      leadDrafts.termsAcceptedAt,
+      submissions.consentTextHash,
+      submissions.termsVersion,
+      submissions.termsTextHash,
+      submissions.termsAcceptedAt,
+    ]) {
+      expect(column.notNull).toBe(true);
+    }
+    expect(draftChecks).toContain('lead_drafts_consent_version_format');
+    expect(draftChecks).toContain('lead_drafts_consent_text_hash_format');
+    expect(draftChecks).toContain('lead_drafts_terms_version_format');
+    expect(draftChecks).toContain('lead_drafts_terms_text_hash_format');
+    expect(submissionChecks).toContain('submissions_consent_text_hash_format');
+    expect(submissionChecks).toContain('submissions_terms_version_format');
+    expect(submissionChecks).toContain('submissions_terms_text_hash_format');
+  });
+
+  it('persists a mandatory request fingerprint for submission idempotency', () => {
+    const checks = getTableConfig(submissions).checks.map(({ name }) => name);
+
+    expect(submissions.requestHash.name).toBe('request_hash');
+    expect(submissions.requestHash.notNull).toBe(true);
+    expect(submissions.requestHash.getSQLType()).toBe('varchar(64)');
+    expect(checks).toContain('submissions_request_hash_format');
+  });
+
   it('accepts either a city or a region while rejecting a missing location', () => {
     const checks = getTableConfig(submissions).checks.map(({ name }) => name);
 

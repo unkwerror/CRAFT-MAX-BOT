@@ -48,7 +48,7 @@ function validPayload(documentIds: readonly string[]): LeadFormData {
     description: 'Нужно подготовить проект реставрации и провести экспертизу.',
     links: [],
     documentIds: [...documentIds],
-    selectedCaseIds: ['tyumen-heritage-quarter'],
+    selectedCaseIds: ['citypumpingstation'],
     contact: { phone: '+79991234567', email: 'owner@example.com' },
     consent: { version: '2026-07-15', accepted: true },
   };
@@ -158,7 +158,7 @@ describe('mock upload and submission APIs', () => {
     expect(first.submission.submissionId).toMatch(/^CRAFT72-MOCK-[A-F0-9]{24}$/);
     expect(first.submission.materials).toEqual([completed.document]);
     expect(first.submission.phoneVerified).toBe(true);
-    expect(first.submission.matchedCases[0]?.id).toBe('tyumen-heritage-quarter');
+    expect(first.submission.matchedCases[0]?.id).toBe('citypumpingstation');
     expect(first.submission.matchedCases.length).toBeGreaterThanOrEqual(1);
     expect(first.submission.matchedCases.length).toBeLessThanOrEqual(3);
     expect(api.readSubmission(first.submission.submissionId)).toEqual(first);

@@ -144,6 +144,7 @@ function finalFormFromDraft(draft: LeadDraftFormState): LeadFormData | null {
 }
 
 interface BriefStepFieldsProps {
+  readonly consentVersion: string;
   readonly draft: LeadDraftFormState;
   readonly errors: BriefErrors;
   readonly materialCount: number;
@@ -152,11 +153,14 @@ interface BriefStepFieldsProps {
   readonly onOpenMaterials?: () => void;
   readonly onRequestContact?: () => void | Promise<void>;
   readonly phoneVerified: boolean;
+  readonly privacyPolicyUrl?: string;
   readonly requestingContact: boolean;
+  readonly serverBacked: boolean;
   readonly step: BriefStep;
 }
 
 const BriefStepFields = ({
+  consentVersion,
   draft,
   errors,
   materialCount,
@@ -165,7 +169,9 @@ const BriefStepFields = ({
   onOpenMaterials,
   onRequestContact,
   phoneVerified,
+  privacyPolicyUrl,
   requestingContact,
+  serverBacked,
   step,
 }: BriefStepFieldsProps): ReactNode => {
   const update = (patch: Partial<LeadDraftFormState>): void => {
@@ -503,7 +509,11 @@ const BriefStepFields = ({
           {phoneVerified ? (
             <InlineNotice icon="check" tone="success">
               <strong>Контакт получен из MAX</strong>
-              <span>Серверная проверка подписи контакта будет добавлена на этапе 3.</span>
+              <span>
+                {serverBacked
+                  ? 'Подпись контакта проверена сервером.'
+                  : 'В веб-превью используется демонстрационное состояние контакта.'}
+              </span>
             </InlineNotice>
           ) : (
             <InlineNotice icon="phone">
@@ -543,13 +553,13 @@ const BriefStepFields = ({
         <>
           <ToggleRow
             checked={draft.consent?.accepted === true}
-            description="Согласие относится к сведениям и материалам, указанным в этом брифе."
-            label="Согласен на обработку данных"
+            description="Для сохранения и рассмотрения брифа, связи со мной и подготовки предложения. Срок хранения заявки — до 3 лет; согласие можно отозвать через manager@craft72.ru. Без согласия отправка через Mini App невозможна."
+            label="Даю согласие ООО «Крафт Групп» на обработку данных заявки"
             onChange={(event) =>
               update({
                 consent: {
                   accepted: event.currentTarget.checked,
-                  version: draft.consent?.version ?? MOCK_CONSENT_VERSION,
+                  version: consentVersion,
                 },
               })
             }
@@ -557,10 +567,23 @@ const BriefStepFields = ({
           {errors.consent === undefined ? null : (
             <span className="field__error">{errors.consent}</span>
           )}
-          <InlineNotice icon="warning" tone="warning">
-            <strong>Демонстрационный текст согласия</strong>
-            <span>{MOCK_CONTENT_NOTICE}</span>
-          </InlineNotice>
+          {privacyPolicyUrl === undefined ? (
+            <InlineNotice icon="warning" tone="warning">
+              <strong>Демонстрационный текст согласия</strong>
+              <span>{MOCK_CONTENT_NOTICE}</span>
+            </InlineNotice>
+          ) : (
+            <InlineNotice icon="shield">
+              <strong>Политика обработки данных</strong>
+              <span>
+                Перед подтверждением ознакомьтесь с{' '}
+                <a href={privacyPolicyUrl} rel="noreferrer" target="_blank">
+                  опубликованной политикой CRAFT72
+                </a>
+                . Версия согласия: {consentVersion}.
+              </span>
+            </InlineNotice>
+          )}
         </>
       );
 
@@ -632,6 +655,7 @@ const BriefStepFields = ({
 };
 
 export interface BriefScreenProps {
+  readonly consentVersion?: string;
   readonly draft: LeadDraftFormState;
   readonly isSaving?: boolean;
   readonly materialCount?: number;
@@ -643,11 +667,14 @@ export interface BriefScreenProps {
   readonly onRequestContact?: () => void | Promise<void>;
   readonly onSaveAndExit: (draft: LeadDraftFormState) => void | Promise<void>;
   readonly phoneVerified?: boolean;
+  readonly privacyPolicyUrl?: string;
   readonly requestingContact?: boolean;
+  readonly serverBacked?: boolean;
   readonly step: BriefStep;
 }
 
 export const BriefScreen = ({
+  consentVersion = MOCK_CONSENT_VERSION,
   draft,
   isSaving = false,
   materialCount = draft.documentIds?.length ?? 0,
@@ -659,7 +686,9 @@ export const BriefScreen = ({
   onRequestContact,
   onSaveAndExit,
   phoneVerified = false,
+  privacyPolicyUrl,
   requestingContact = false,
+  serverBacked = false,
   step,
 }: BriefScreenProps) => {
   const [errors, setErrors] = useState<BriefErrors>({});
@@ -695,6 +724,7 @@ export const BriefScreen = ({
         <p className="form-card__subtitle">{meta.subtitle}</p>
         <div className="form-stack">
           <BriefStepFields
+            consentVersion={consentVersion}
             draft={draft}
             errors={errors}
             materialCount={materialCount}
@@ -703,7 +733,9 @@ export const BriefScreen = ({
             {...(onOpenMaterials === undefined ? {} : { onOpenMaterials })}
             {...(onRequestContact === undefined ? {} : { onRequestContact })}
             phoneVerified={phoneVerified}
+            {...(privacyPolicyUrl === undefined ? {} : { privacyPolicyUrl })}
             requestingContact={requestingContact}
+            serverBacked={serverBacked}
             step={step}
           />
         </div>

@@ -137,6 +137,16 @@ class MaxBridgeAdapterImpl implements MaxBridgeAdapter {
     return this.getWebApp() !== undefined;
   }
 
+  getInitData(): string | null {
+    const initData = this.getWebApp()?.initData;
+    return typeof initData === 'string' &&
+      initData.length > 0 &&
+      initData.length <= 16_384 &&
+      !initData.includes('\0')
+      ? initData
+      : null;
+  }
+
   getPlatform(): MaxPlatform {
     const platform = this.getWebApp()?.platform;
     return isMaxPlatform(platform) ? platform : 'web';

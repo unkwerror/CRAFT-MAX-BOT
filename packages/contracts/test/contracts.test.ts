@@ -26,6 +26,8 @@ import {
   UploadCompleteRequestSchema,
   UploadFileNameSchema,
   UploadInitRequestSchema,
+  privacyConsentText,
+  termsAcceptanceText,
   type LeadFormData,
   type StartParam,
 } from '../src/index.js';
@@ -34,6 +36,7 @@ const NOW = '2026-07-15T08:00:00.000Z';
 const LATER = '2026-07-15T09:00:00.000Z';
 const UUID = 'a5fd2117-1821-419f-8ed7-6e9b2b9d4133';
 const SHA256 = 'a'.repeat(64);
+const SESSION_TOKEN = 'A'.repeat(43);
 
 const validCase = {
   id: 'office-reconstruction',
@@ -113,11 +116,34 @@ describe('start_param', () => {
 
 describe('MAX authentication and contact verification', () => {
   it('accepts only the signed initData string', () => {
-    expect(MaxAuthRequestSchema.safeParse({ initData: 'query_id=q1&hash=abc' }).success).toBe(true);
+    const consentVersion = 'miniapp-2026-07-15';
+    const evidence = {
+      initData: 'query_id=q1&hash=abc',
+      privacyConsent: {
+        accepted: true,
+        acceptedAt: NOW,
+        text: privacyConsentText(consentVersion),
+        version: consentVersion,
+      },
+      termsAcceptance: {
+        accepted: true,
+        acceptedAt: NOW,
+        text: termsAcceptanceText(consentVersion),
+        version: consentVersion,
+      },
+    } as const;
+
+    expect(MaxAuthRequestSchema.safeParse(evidence).success).toBe(true);
     expect(
       MaxAuthRequestSchema.safeParse({
-        initData: 'query_id=q1&hash=abc',
+        ...evidence,
         initDataUnsafe: { user: { id: 1 } },
+      }).success,
+    ).toBe(false);
+    expect(
+      MaxAuthRequestSchema.safeParse({
+        ...evidence,
+        privacyConsent: { ...evidence.privacyConsent, text: 'Подменённый текст' },
       }).success,
     ).toBe(false);
   });
@@ -133,7 +159,7 @@ describe('MAX authentication and contact verification', () => {
         languageCode: 'ru',
         photoUrl: null,
       },
-      session: { expiresAt: LATER, verifiedContact: null },
+      session: { token: SESSION_TOKEN, expiresAt: LATER, verifiedContact: null },
       startParam: 'new_project',
     };
 
@@ -167,6 +193,7 @@ describe('MAX authentication and contact verification', () => {
   it('restores only a server-owned verified contact snapshot', () => {
     expect(
       MaxSessionSnapshotSchema.safeParse({
+        token: SESSION_TOKEN,
         expiresAt: LATER,
         verifiedContact: {
           phone: '+79991234567',
@@ -177,6 +204,7 @@ describe('MAX authentication and contact verification', () => {
     expect(MaxSessionSnapshotSchema.safeParse({ expiresAt: LATER }).success).toBe(false);
     expect(
       MaxSessionSnapshotSchema.safeParse({
+        token: SESSION_TOKEN,
         expiresAt: LATER,
         verifiedContact: {
           phone: '+79991234567',

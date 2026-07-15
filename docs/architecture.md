@@ -11,6 +11,7 @@ PostgreSQL is the system of record for users, sessions, drafts, submissions, doc
 webhook deduplication and integration retries. The browser never receives MAX or Tracker
 credentials. Files use private storage and only metadata belongs in PostgreSQL.
 
-Stage 2 runs the Mini App against deterministic in-browser mocks. Trusted MAX authentication,
-contact verification and server-owned drafts start in Stage 3; bot/webhook and durable outbox
-processing follow in Stage 4. The browser bundle never embeds MAX or Tracker credentials.
+Stage 3 uses trusted MAX authentication, contact verification, server-owned drafts and submissions
+in production. Outside MAX, the Mini App retains a deterministic local preview without server
+authentication. Bot/webhook delivery and durable Tracker outbox processing follow in Stage 4. The
+browser bundle never embeds MAX or Tracker credentials.

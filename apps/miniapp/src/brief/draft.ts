@@ -15,9 +15,11 @@ import { MOCK_CONSENT_VERSION } from '../content.js';
 
 export type BriefErrors = Readonly<Record<string, string>>;
 
-export const createEmptyDraft = (): LeadDraftFormState => ({
+export const createEmptyDraft = (
+  consentVersion: string = MOCK_CONSENT_VERSION,
+): LeadDraftFormState => ({
   area: {},
-  consent: { accepted: false, version: MOCK_CONSENT_VERSION },
+  consent: { accepted: false, version: consentVersion },
   contact: {},
   documentIds: [],
   links: [],

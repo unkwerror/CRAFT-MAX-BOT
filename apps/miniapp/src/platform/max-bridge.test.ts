@@ -51,6 +51,7 @@ describe('MAX Bridge adapter', () => {
     const unsubscribe = bridge.backButton.subscribe(vi.fn());
 
     expect(bridge.isAvailable()).toBe(false);
+    expect(bridge.getInitData()).toBeNull();
     expect(bridge.getPlatform()).toBe('web');
     expect(bridge.getTheme()).toBe('light');
     await expect(bridge.getViewportSize()).resolves.toEqual({ width: 0, height: 0 });
@@ -76,8 +77,21 @@ describe('MAX Bridge adapter', () => {
     const bridge = createMaxBridge({ WebApp: webApp });
 
     expect(bridge.isAvailable()).toBe(true);
+    expect(bridge.getInitData()).toBe('query_id=q1&auth_date=1784102400&hash=signed');
     expect(bridge.getPlatform()).toBe('ios');
     await expect(bridge.getViewportSize()).resolves.toEqual({ width: 393.5, height: 852 });
+  });
+
+  it('does not expose empty or oversized initData as an authentication credential', () => {
+    const empty = createMaxBridge({ WebApp: createWebApp({ initData: '' }) });
+    const oversized = createMaxBridge({
+      WebApp: createWebApp({ initData: 'x'.repeat(16_385) }),
+    });
+    const nulDelimited = createMaxBridge({ WebApp: createWebApp({ initData: 'query\0hash' }) });
+
+    expect(empty.getInitData()).toBeNull();
+    expect(oversized.getInitData()).toBeNull();
+    expect(nulDelimited.getInitData()).toBeNull();
   });
 
   it('falls back to browser viewport when the native call fails or is malformed', async () => {
