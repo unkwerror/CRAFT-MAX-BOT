@@ -608,13 +608,13 @@ export class PostgresTrackerOutboxStore implements TrackerOutboxStore {
                 select 1 from ${integrationOutbox} as failed_operation
                 where failed_operation.submission_id = synchronized_submission.id
                   and failed_operation.status = 'dead_letter'
-              ) then 'sync_failed'
+              ) then 'sync_failed'::submission_status
               when exists (
                 select 1 from ${integrationOutbox} as remaining_operation
                 where remaining_operation.submission_id = synchronized_submission.id
                   and remaining_operation.status <> 'completed'
-              ) then 'syncing'
-              else 'synced'
+              ) then 'syncing'::submission_status
+              else 'synced'::submission_status
             end,
             updated_at = ${now}
         where synchronized_submission.id = ${claim.submissionDatabaseId}
@@ -641,7 +641,7 @@ export class PostgresTrackerOutboxStore implements TrackerOutboxStore {
     await this.#database.transaction(async (transaction) => {
       const failed = await transaction.execute(sql`
         update ${integrationOutbox}
-        set status = ${nextStatus},
+        set status = ${nextStatus}::integration_outbox_status,
             next_attempt_at = ${nextAttemptAt},
             lease_token = null,
             lease_expires_at = null,
@@ -675,9 +675,10 @@ export class PostgresTrackerOutboxStore implements TrackerOutboxStore {
         `);
       }
 
+      const submissionStatus = retryAt === null ? 'sync_failed' : 'syncing';
       const updatedSubmission = await transaction.execute(sql`
         update ${submissions}
-        set status = ${retryAt === null ? 'sync_failed' : 'syncing'}, updated_at = ${now}
+        set status = ${submissionStatus}::submission_status, updated_at = ${now}
         where id = ${claim.submissionDatabaseId}
           and status <> 'cancelled'
       `);
