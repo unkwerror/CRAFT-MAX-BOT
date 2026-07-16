@@ -69,7 +69,7 @@ describe('Tracker Stage 6 mapping', () => {
     expect(plan.body).not.toHaveProperty(TRACKER_DISCOVERY_SCHEMA.part.innField);
   });
 
-  it('links CRM to PART without guessing unapproved fixed-list values', () => {
+  it('links CRM to PART and renders taxonomy values in Russian', () => {
     const plan = buildTrackerIssuePlan('create_crm', submission, {
       crmKey: null,
       partnerKey: 'PART-10',
@@ -83,6 +83,16 @@ describe('Tracker Stage 6 mapping', () => {
     expect(plan.body).not.toHaveProperty('69bcddb4032fba225e55fc96--sourceLida');
     expect(plan.body).not.toHaveProperty('69bcddb4032fba225e55fc96--stage');
     expect(plan.body).not.toHaveProperty('69bcddb4032fba225e55fc96--type');
+    const description = String(plan.body.description);
+    expect(description).toContain('Роль заказчика:** Девелопер');
+    expect(description).toContain('Тип объекта:** Офис и бизнес-центр');
+    expect(description).toContain('Стадия проекта:** Концепция');
+    expect(description).toContain('Услуги:** Архитектурная концепция');
+    expect(description).toContain('Масштаб проекта:** Один объект');
+    expect(description).toContain('Номер заявки:**');
+    expect(description).not.toContain('objectType');
+    expect(description).not.toMatch(/\*\*Роль:\*\* developer/);
+    expect(description).not.toMatch(/\*\*Услуги:\*\* architecture/);
   });
 
   it('creates DOCS only for materials and links it to both predecessors', () => {

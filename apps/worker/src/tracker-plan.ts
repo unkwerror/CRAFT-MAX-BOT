@@ -145,6 +145,95 @@ function summary(prefix: string, value: string): string {
   return `${prefix}: ${safeText(value, 180)}`.slice(0, 255);
 }
 
+/** Human-readable Russian labels for Mini App taxonomy keys stored in submissions. */
+const ROLE_LABELS: Readonly<Record<string, string>> = {
+  developer: 'Девелопер',
+  general_contractor: 'Генподрядчик',
+  government_customer: 'Государственный заказчик',
+  investor: 'Инвестор',
+  other: 'Другая роль',
+  property_owner: 'Собственник',
+};
+
+const OBJECT_TYPE_LABELS: Readonly<Record<string, string>> = {
+  'cultural-heritage': 'Объект культурного наследия',
+  hospitality: 'Гостиница и туризм',
+  industrial: 'Промышленный объект',
+  office: 'Офис и бизнес-центр',
+  other: 'Другой объект',
+  'public-building': 'Общественное здание',
+  residential: 'Жилой комплекс',
+  'urban-development': 'Территория / мастер-план',
+};
+
+const PROJECT_STAGE_LABELS: Readonly<Record<string, string>> = {
+  concept: 'Концепция',
+  construction: 'Строительство',
+  design: 'Проектная документация',
+  idea: 'Идея или предпроект',
+  reconstruction: 'Эксплуатация / реконструкция',
+  'working-documentation': 'Рабочая документация',
+};
+
+const SERVICE_LABELS: Readonly<Record<string, string>> = {
+  architecture: 'Архитектурная концепция',
+  'author-supervision': 'Авторский надзор',
+  'engineering-surveys': 'Инженерные изыскания',
+  'expertise-support': 'Сопровождение экспертизы',
+  'general-design': 'Проектная документация',
+  restoration: 'Реконструкция и ОКН',
+  'technical-customer': 'Функция технического заказчика',
+  'urban-planning': 'Мастер-план и градостроительство',
+};
+
+const PROJECT_SCOPE_LABELS: Readonly<Record<string, string>> = {
+  portfolio: 'Портфель объектов',
+  single_object: 'Один объект',
+};
+
+function russianLabel(map: Readonly<Record<string, string>>, value: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) return 'Не указано';
+  return map[normalized] ?? safeText(normalized, 255);
+}
+
+function russianRole(value: string): string {
+  return russianLabel(ROLE_LABELS, value);
+}
+
+function russianObjectType(value: string): string {
+  return russianLabel(OBJECT_TYPE_LABELS, value);
+}
+
+function russianProjectStage(value: string): string {
+  return russianLabel(PROJECT_STAGE_LABELS, value);
+}
+
+function russianProjectScope(value: string): string {
+  return russianLabel(PROJECT_SCOPE_LABELS, value);
+}
+
+function russianServices(values: readonly string[]): string {
+  if (values.length === 0) return 'Не указано';
+  return values.map((service) => russianLabel(SERVICE_LABELS, service)).join(', ');
+}
+
+function russianDesiredStart(value: string | null): string {
+  if (value === null || value.trim().length === 0) return 'Пока не знаю';
+  if (value === 'unknown') return 'Пока не знаю';
+  // Keep ISO dates as-is; they are already user-facing.
+  return safeText(value, 128);
+}
+
+function formatBytesRu(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'неизвестно';
+  if (bytes < 1_024) return `${String(bytes)} Б`;
+  if (bytes < 1_048_576) {
+    return `${(bytes / 1_024).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} КБ`;
+  }
+  return `${(bytes / 1_048_576).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} МБ`;
+}
+
 function partnerPlan(submission: TrackerSubmissionSnapshot): TrackerCreateIssueBody {
   const withoutInn = submission.inn === null;
   return {
@@ -161,12 +250,12 @@ function partnerPlan(submission: TrackerSubmissionSnapshot): TrackerCreateIssueB
     [TRACKER_DISCOVERY_SCHEMA.part.preferredChannelField]: ['MAX'],
     description: [
       '## Обращение CRAFT72 из MAX',
-      line('Submission ID', submission.submissionId),
+      line('Номер заявки', submission.submissionId),
       line('Организация', submission.organization),
       line('ИНН', submission.inn),
       line('Контактное лицо', submission.contactName),
       line('Телефон', submission.contactPhone),
-      line('E-mail', submission.contactEmail),
+      line('Электронная почта', submission.contactEmail),
       line('Канал связи', 'MAX'),
       line('Ручная проверка дубля', withoutInn),
     ].join('\n'),
@@ -200,35 +289,40 @@ function crmPlan(
     ].join(' · '),
     description: [
       '## Лид CRAFT72 из MAX',
-      line('Submission ID', submission.submissionId),
-      line('MAX user ID', submission.maxUserId),
+      line('Номер заявки', submission.submissionId),
+      line('ID пользователя MAX', submission.maxUserId),
       line('Источник', 'MAX'),
       line('Организация', submission.organization),
       line('ИНН', submission.inn),
-      line('Контакт', submission.contactName),
+      line('Контактное лицо', submission.contactName),
       line('Телефон', submission.contactPhone),
-      line('E-mail', submission.contactEmail),
-      line('Роль', submission.role),
-      line('Тип объекта (исходное значение)', submission.objectType),
+      line('Электронная почта', submission.contactEmail),
+      line('Роль заказчика', russianRole(submission.role)),
+      line('Тип объекта', russianObjectType(submission.objectType)),
       line('Город', submission.city),
       line('Регион', submission.region),
-      line('Масштаб', submission.projectScope),
+      line('Масштаб проекта', russianProjectScope(submission.projectScope)),
       line('Количество объектов', submission.objectCount),
       line('Площадь, м²', submission.areaSquareMeters),
-      line('Стадия (исходное значение)', submission.projectStage),
-      line('Услуги', submission.services.join(', ')),
+      line('Стадия проекта', russianProjectStage(submission.projectStage)),
+      line('Услуги', russianServices(submission.services)),
       line('Нужна экспертиза', submission.expertiseRequired),
       line('Объект культурного наследия', submission.culturalHeritage),
-      line('Желаемое начало', submission.desiredStart),
-      line('Описание', submission.description),
-      line('Выбранные кейсы', submission.selectedCaseIds.join(', ')),
-      line('PART', partnerKey),
+      line('Желаемое начало работ', russianDesiredStart(submission.desiredStart)),
+      line('Описание задачи', submission.description),
+      line(
+        'Выбранные проекты',
+        submission.selectedCaseIds.length === 0
+          ? 'Не выбраны'
+          : submission.selectedCaseIds.join(', '),
+      ),
+      line('Связанный партнёр (PART)', partnerKey),
     ].join('\n'),
     links: [{ issue: partnerKey, relationship: 'relates' }],
     markupType: 'md',
     queue: TRACKER_DISCOVERY_SCHEMA.crm.queue,
     summary: summary(
-      'MAX-лид',
+      'Лид MAX',
       `${submission.submissionId} · ${submission.organization ?? submission.contactName}`,
     ),
     unique: `craft72:crm:${submission.submissionId}`,
@@ -246,15 +340,15 @@ function docsPlan(
   const crmKey = issueKey(dependencies.crmKey, 'CRM');
   const documentLines = submission.documents.map(
     (document) =>
-      `- ${safeText(document.originalName, 255)} · ${document.mimeType} · ${String(document.sizeBytes)} bytes · SHA-256 ${document.sha256}`,
+      `- ${safeText(document.originalName, 255)} · ${document.mimeType} · ${formatBytesRu(document.sizeBytes)} · SHA-256 ${document.sha256}`,
   );
   const linkLines = submission.materialLinks.map((linkValue) => `- ${safeText(linkValue, 2_048)}`);
   return {
     description: [
-      '## Материалы CRAFT72',
-      line('Submission ID', submission.submissionId),
-      line('CRM', crmKey),
-      line('PART', partnerKey),
+      '## Материалы заявки CRAFT72',
+      line('Номер заявки', submission.submissionId),
+      line('Заявка CRM', crmKey),
+      line('Партнёр PART', partnerKey),
       '',
       '### Загруженные файлы',
       ...(documentLines.length === 0 ? ['- Нет'] : documentLines),
@@ -262,7 +356,7 @@ function docsPlan(
       '### Ссылки пользователя',
       ...(linkLines.length === 0 ? ['- Нет'] : linkLines),
       '',
-      'Приватные storage keys и токены доступа в Tracker не передаются.',
+      'Приватные ключи хранилища и токены доступа в Tracker не передаются.',
     ].join('\n'),
     links: [
       { issue: crmKey, relationship: 'relates' },
