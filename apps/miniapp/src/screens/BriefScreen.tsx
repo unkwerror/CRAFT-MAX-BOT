@@ -697,7 +697,8 @@ export const BriefScreen = ({
 
   useEffect(() => {
     setErrors({});
-    window.scrollTo({ behavior: 'auto', top: 0 });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
     const frame = window.requestAnimationFrame(() => {
       stepHeadingRef.current?.focus({ preventScroll: true });
     });

@@ -69,6 +69,22 @@ test('mobile CTA geometry and motion remain stable', async ({ browser }, testInf
     expect(layoutState.animationName, viewport.name).toBe('screen-enter');
     expect(Number.parseFloat(layoutState.animationDuration), viewport.name).toBeGreaterThan(0.18);
 
+    if (viewport.name === 'mobile-390') {
+      const routeScroll = await page.evaluate(() => {
+        document.documentElement.scrollTop = 900;
+        document.body.scrollTop = 900;
+        const before = scrollY;
+        const finder = [...document.querySelectorAll('button')].find((button) =>
+          button.textContent?.includes('Подобрать услугу'),
+        );
+        if (finder instanceof HTMLButtonElement) finder.click();
+        return { after: scrollY, before };
+      });
+      expect(routeScroll.before).toBeGreaterThan(500);
+      expect(routeScroll.after).toBe(0);
+      await expect(page.getByRole('heading', { name: 'Подобрать услугу' })).toBeVisible();
+    }
+
     await page.emulateMedia({ reducedMotion: 'reduce' });
     const reducedDuration = await page
       .locator('.screen-shell')

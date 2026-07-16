@@ -154,7 +154,8 @@ export const App = () => {
     const href = routeHref(nextRoute);
     if (window.location.hash !== href) window.location.hash = href;
     setRoute(nextRoute);
-    window.scrollTo({ behavior: 'auto', top: 0 });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
   }, []);
 
   const persistDraft = useCallback(
