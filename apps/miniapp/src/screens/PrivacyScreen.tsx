@@ -1,4 +1,3 @@
-import { privacyConsentText, termsAcceptanceText } from '@craft72/contracts/source';
 import { useState } from 'react';
 
 import { InlineNotice } from '../components/FormControls.js';
@@ -21,8 +20,66 @@ export const PrivacyScreen = ({
 }: PrivacyScreenProps) => {
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const consentText = privacyConsentText(consentVersion ?? 'preview');
-  const termsText = termsAcceptanceText(consentVersion ?? 'preview');
+
+  if (onContinue !== undefined) {
+    const canContinue = consentAccepted && termsAccepted;
+
+    return (
+      <Page className="page--narrow consent-page" withNavigation={false}>
+        <section aria-labelledby="consent-start-title" className="consent-start">
+          <div className="consent-start__intro">
+            <span className="eyebrow">О данных</span>
+            <h1 id="consent-start-title">Перед началом</h1>
+            <p>Отметьте два пункта и нажмите «Продолжить».</p>
+          </div>
+
+          <div className="consent-start__choices">
+            <label className="consent-choice">
+              <input
+                checked={consentAccepted}
+                onChange={(event) => setConsentAccepted(event.currentTarget.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong>Согласен на обработку персональных данных</strong>
+                {policyUrl === undefined ? null : (
+                  <a href={policyUrl} rel="noreferrer" target="_blank">
+                    Политика конфиденциальности
+                  </a>
+                )}
+              </span>
+            </label>
+
+            <label className="consent-choice">
+              <input
+                checked={termsAccepted}
+                onChange={(event) => setTermsAccepted(event.currentTarget.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong>Принимаю условия использования сервиса</strong>
+                {termsUrl === undefined ? null : (
+                  <a href={termsUrl} rel="noreferrer" target="_blank">
+                    Условия использования
+                  </a>
+                )}
+              </span>
+            </label>
+          </div>
+
+          <button
+            className="consent-start__continue"
+            disabled={!canContinue}
+            onClick={onContinue}
+            type="button"
+          >
+            <span>Продолжить</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </section>
+      </Page>
+    );
+  }
 
   return (
     <Page className="page--narrow" withNavigation={false}>
@@ -82,47 +139,6 @@ export const PrivacyScreen = ({
           До подключения закрытого файлового хранилища физические файлы на production-сервер не
           передаются. Для обсуждения проекта можно добавить HTTPS-ссылку на защищённое облако.
         </p>
-
-        {onContinue === undefined ? null : (
-          <section className="consent-gate" aria-labelledby="consent-gate-title">
-            <h2 id="consent-gate-title">Согласие на обработку данных</h2>
-            <label className="consent-control">
-              <input
-                checked={consentAccepted}
-                onChange={(event) => setConsentAccepted(event.currentTarget.checked)}
-                type="checkbox"
-              />
-              <span>{consentText}</span>
-            </label>
-            <label className="consent-control">
-              <input
-                checked={termsAccepted}
-                onChange={(event) => setTermsAccepted(event.currentTarget.checked)}
-                type="checkbox"
-              />
-              <span>
-                {termsText}{' '}
-                {termsUrl === undefined ? null : (
-                  <a href={termsUrl} rel="noreferrer" target="_blank">
-                    Открыть условия использования.
-                  </a>
-                )}
-              </span>
-            </label>
-            <p className="consent-gate__hint">
-              Галочка не установлена заранее. Без согласия MAX-профиль и введённые данные не
-              отправляются на сервер; Mini App можно закрыть без последствий.
-            </p>
-            <button
-              className="save-exit"
-              disabled={!consentAccepted || !termsAccepted}
-              onClick={onContinue}
-              type="button"
-            >
-              Даю согласие и продолжить
-            </button>
-          </section>
-        )}
       </article>
     </Page>
   );

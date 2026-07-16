@@ -104,13 +104,13 @@ describe('App Stage 3 runtime', () => {
     const { App } = await import('./App.js');
     render(<App />);
 
-    expect(screen.getByRole('heading', { name: 'Прозрачная работа с данными' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Перед началом' })).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.getByRole('link', { name: 'по этой ссылке' }).getAttribute('href')).toBe(
-      'https://craft72.ru/privacy',
-    );
+    expect(
+      screen.getByRole('link', { name: 'Политика конфиденциальности' }).getAttribute('href'),
+    ).toBe('https://craft72.ru/privacy');
 
-    const continueButton = screen.getByRole('button', { name: 'Даю согласие и продолжить' });
+    const continueButton = screen.getByRole('button', { name: 'Продолжить' });
     expect((continueButton as HTMLButtonElement).disabled).toBe(true);
     const checkboxes = screen.getAllByRole('checkbox');
     expect(checkboxes).toHaveLength(2);
