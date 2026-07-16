@@ -31,6 +31,11 @@ import { ZodError, type ZodType } from 'zod';
 
 import { MaxProofError, validateMaxInitData, verifyMaxContact } from './max-auth.js';
 import {
+  MaxWebhookUpdateSchema,
+  isValidMaxWebhookSecret,
+  parseMaxWebhookUpdate,
+} from './max-webhook.js';
+import {
   StoreConflictError,
   StoreNotFoundError,
   StoreUnauthorizedError,
@@ -99,6 +104,7 @@ export interface Stage3ApiOptions {
   readonly contactMaxAgeSeconds: number;
   readonly initDataMaxAgeSeconds: number;
   readonly logger?: FastifyServerOptions['logger'];
+  readonly maxWebhookSecret: string;
   readonly now?: () => Date;
   readonly publicBaseUrl: string;
   readonly rateLimitMax: number;
@@ -238,7 +244,14 @@ export async function buildStage3Api(options: Stage3ApiOptions): Promise<Fastify
     ) {
       apiError = new ApiHttpError(400, 'BAD_REQUEST', 'Request body is invalid');
     } else {
-      request.log.error({ error, requestId: request.id }, 'Unhandled API error');
+      request.log.error(
+        {
+          errorCode: getErrorCode(error) ?? 'unknown',
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          requestId: request.id,
+        },
+        'Unhandled API error',
+      );
       apiError = new ApiHttpError(500, 'INTERNAL_ERROR', 'An internal server error occurred');
     }
 
@@ -274,6 +287,23 @@ export async function buildStage3Api(options: Stage3ApiOptions): Promise<Fastify
       });
       return reply.status(503).send(response);
     }
+  });
+
+  app.post('/webhooks/max', { config: { rateLimit: false } }, async (request, reply) => {
+    const secretHeader = request.headers['x-max-bot-api-secret'];
+    const providedSecret = typeof secretHeader === 'string' ? secretHeader : undefined;
+    if (!isValidMaxWebhookSecret(providedSecret, options.maxWebhookSecret)) {
+      throw new ApiHttpError(401, 'UNAUTHORIZED', 'Webhook authentication failed');
+    }
+
+    const payload = parseWithSchema(MaxWebhookUpdateSchema, request.body);
+    const accepted = parseMaxWebhookUpdate(payload);
+    const inserted = await options.store.acceptMaxWebhook(accepted);
+    request.log.info(
+      { duplicate: !inserted, eventKey: accepted.eventKey, eventType: accepted.eventType },
+      'MAX webhook accepted',
+    );
+    return reply.status(200).send({ accepted: true, duplicate: !inserted });
   });
 
   app.post('/api/auth/max', async (request) => {

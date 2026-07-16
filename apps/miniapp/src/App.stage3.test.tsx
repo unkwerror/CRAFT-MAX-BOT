@@ -14,7 +14,7 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
-function installMaxBridge(): void {
+function installMaxBridge(): MaxWebAppBridge {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined);
   const backButton = {
     isVisible: false,
@@ -23,7 +23,7 @@ function installMaxBridge(): void {
     onClick: vi.fn(),
     offClick: vi.fn(),
   };
-  window.WebApp = {
+  const webApp = {
     initData: 'query_id=signed&auth_date=1784102400&hash=server-validated',
     initDataUnsafe: {},
     platform: 'android',
@@ -36,6 +36,8 @@ function installMaxBridge(): void {
     openLink: vi.fn(),
     openMaxLink: vi.fn(),
   } as MaxWebAppBridge;
+  window.WebApp = webApp;
+  return webApp;
 }
 
 afterEach(() => {
@@ -52,6 +54,10 @@ describe('App Stage 3 runtime', () => {
     vi.stubEnv('VITE_PRIVACY_POLICY_URL', 'https://craft72.ru/privacy');
     vi.stubEnv('VITE_CONSENT_VERSION', 'privacy-2026-07-15');
     installMaxBridge();
+    let resolveDraftRequest!: (response: Response) => void;
+    const draftResponse = new Promise<Response>((resolve) => {
+      resolveDraftRequest = resolve;
+    });
 
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
@@ -94,7 +100,7 @@ describe('App Stage 3 runtime', () => {
 
       if (url === '/api/leads/draft') {
         expect(new Headers(init?.headers).get('authorization')).toBe(`Bearer ${SESSION_TOKEN}`);
-        return jsonResponse({ draft: null });
+        return draftResponse;
       }
 
       throw new Error(`Unexpected request: ${url}`);
@@ -119,10 +125,16 @@ describe('App Stage 3 runtime', () => {
     await userEvent.click(checkboxes[1] as HTMLElement);
     await userEvent.click(continueButton);
 
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('Проверяем защищённую MAX-сессию…')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Новый проект' })).toBeNull();
+    expect(window.location.hash).toBe('');
+
+    resolveDraftRequest(jsonResponse({ draft: null }));
     expect(await screen.findByText('MAX · защищённая сессия')).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    await userEvent.click(screen.getByRole('button', { name: 'Начать бриф' }));
     expect(screen.getByRole('heading', { name: 'Новый проект' })).toBeTruthy();
+    expect(window.location.hash).toBe('#brief');
   });
 
   it('keeps MAX in preview when the approved policy configuration is absent', async () => {
@@ -142,5 +154,47 @@ describe('App Stage 3 runtime', () => {
       ),
     ).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('opens the configured MAX manager chat from the home screen', async () => {
+    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/craft72_bot');
+    const webApp = installMaxBridge();
+
+    const { App } = await import('./App.js');
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
+
+    expect(webApp.openMaxLink).toHaveBeenCalledWith('https://max.ru/craft72_bot');
+    expect(screen.queryByText('Не удалось открыть чат с менеджером')).toBeNull();
+  });
+
+  it('shows a safe fallback when the MAX manager link is not configured', async () => {
+    const webApp = installMaxBridge();
+
+    const { App } = await import('./App.js');
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
+
+    expect(webApp.openMaxLink).not.toHaveBeenCalled();
+    expect(screen.getByText('Чат с менеджером временно недоступен')).toBeTruthy();
+  });
+
+  it('shows a safe fallback when MAX and the browser cannot open the manager link', async () => {
+    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/craft72_bot');
+    vi.spyOn(window, 'open').mockReturnValue(null);
+
+    const { App } = await import('./App.js');
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
+
+    expect(window.open).toHaveBeenCalledWith(
+      'https://max.ru/craft72_bot',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    expect(screen.getByText('Не удалось открыть чат с менеджером')).toBeTruthy();
   });
 });

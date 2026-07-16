@@ -14,12 +14,19 @@ const validEnvironment = {
   API_PORT: '4100',
   PUBLIC_BASE_URL: 'https://craft72app.ru',
   PRIVACY_POLICY_URL: 'https://craft72app.ru/privacy.html',
-  CONSENT_VERSION: 'miniapp-2026-07-15',
+  CONSENT_VERSION: 'miniapp-2026-07-16',
   MAX_API_BASE_URL: 'https://platform-api2.max.ru',
   MAX_BOT_TOKEN: 'rotated-token-with-enough-length',
+  MAX_BOT_PUBLIC_NAME: 'craft72_bot',
   MAX_WEBHOOK_SECRET: 'a-random-webhook-secret-with-32-characters',
+  MAX_API_TIMEOUT_MS: '10000',
   MAX_INIT_DATA_MAX_AGE_SECONDS: '3600',
   MAX_CONTACT_MAX_AGE_SECONDS: '300',
+  BOT_WORKER_POLL_INTERVAL_MS: '500',
+  BOT_WORKER_LEASE_SECONDS: '60',
+  BOT_WORKER_MAX_ATTEMPTS: '8',
+  BOT_RETRY_BASE_MS: '1000',
+  BOT_RETRY_MAX_MS: '300000',
   SESSION_TTL_SECONDS: '3600',
   DRAFT_TTL_SECONDS: '2592000',
   SUBMISSION_RETENTION_DAYS: '1095',
@@ -81,6 +88,31 @@ describe('parseServerEnvironment', () => {
         MAX_API_BASE_URL: 'https://api.max.ru',
       }),
     ).toThrow(ConfigurationError);
+  });
+
+  it('enforces the MAX webhook subscription secret format', () => {
+    for (const MAX_WEBHOOK_SECRET of [
+      'too-short',
+      'webhook secret with spaces and enough length',
+      'x'.repeat(257),
+    ]) {
+      expect(() => parseServerEnvironment({ ...validEnvironment, MAX_WEBHOOK_SECRET })).toThrow(
+        ConfigurationError,
+      );
+    }
+  });
+
+  it('requires the concrete public MAX bot name used by open_app buttons', () => {
+    for (const MAX_BOT_PUBLIC_NAME of [
+      '',
+      '<BOT_PUBLIC_NAME>',
+      'https://craft72app.ru',
+      'bot name',
+    ]) {
+      expect(() => parseServerEnvironment({ ...validEnvironment, MAX_BOT_PUBLIC_NAME })).toThrow(
+        ConfigurationError,
+      );
+    }
   });
 
   it('rejects committed placeholder secrets', () => {

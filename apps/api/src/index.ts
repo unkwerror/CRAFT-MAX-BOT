@@ -22,6 +22,7 @@ const store = new PostgresStage3Store(databaseClient.db, {
 const app = await buildStage3Api({
   store,
   botToken: environment.MAX_BOT_TOKEN,
+  maxWebhookSecret: environment.MAX_WEBHOOK_SECRET,
   consentVersion: environment.CONSENT_VERSION,
   initDataMaxAgeSeconds: environment.MAX_INIT_DATA_MAX_AGE_SECONDS,
   contactMaxAgeSeconds: environment.MAX_CONTACT_MAX_AGE_SECONDS,
@@ -35,6 +36,7 @@ const app = await buildStage3Api({
       paths: [
         'req.headers.authorization',
         'req.headers.cookie',
+        'req.headers.x-max-bot-api-secret',
         'req.body',
         'res.headers.set-cookie',
       ],
@@ -71,12 +73,18 @@ try {
   await app.listen({ host: environment.API_HOST, port: environment.API_PORT });
   cleanupTimer = setInterval(() => {
     void store.cleanupExpired().catch((error: unknown) => {
-      app.log.error({ error }, 'Retention cleanup failed');
+      app.log.error(
+        { errorName: error instanceof Error ? error.name : 'UnknownError' },
+        'Retention cleanup failed',
+      );
     });
   }, environment.RETENTION_CLEANUP_INTERVAL_SECONDS * 1_000);
   cleanupTimer.unref();
 } catch (error) {
-  app.log.error({ error }, 'API startup failed');
+  app.log.error(
+    { errorName: error instanceof Error ? error.name : 'UnknownError' },
+    'API startup failed',
+  );
   await databaseClient.close();
   process.exitCode = 1;
 }

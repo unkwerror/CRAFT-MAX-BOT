@@ -58,9 +58,26 @@ export const serverEnvironmentSchema = z
         'MAX_API_BASE_URL must use the supported MAX API endpoint',
       ),
     MAX_BOT_TOKEN: concreteString('MAX_BOT_TOKEN', 16),
-    MAX_WEBHOOK_SECRET: concreteString('MAX_WEBHOOK_SECRET', 32),
+    MAX_BOT_PUBLIC_NAME: concreteString('MAX_BOT_PUBLIC_NAME')
+      .max(128)
+      .regex(
+        /^[A-Za-z0-9_]+$/,
+        'MAX_BOT_PUBLIC_NAME may contain only letters, digits and underscore',
+      ),
+    MAX_WEBHOOK_SECRET: concreteString('MAX_WEBHOOK_SECRET', 32)
+      .max(256)
+      .regex(
+        /^[A-Za-z0-9_-]+$/,
+        'MAX_WEBHOOK_SECRET may contain only letters, digits, underscore and hyphen',
+      ),
+    MAX_API_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(10_000),
     MAX_INIT_DATA_MAX_AGE_SECONDS: z.coerce.number().int().positive().max(3_600),
     MAX_CONTACT_MAX_AGE_SECONDS: z.coerce.number().int().positive().max(3_600).default(300),
+    BOT_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(100).max(10_000).default(500),
+    BOT_WORKER_LEASE_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
+    BOT_WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(8),
+    BOT_RETRY_BASE_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
+    BOT_RETRY_MAX_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(300_000),
     SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(3_600),
     DRAFT_TTL_SECONDS: z.coerce
       .number()
@@ -124,6 +141,14 @@ export const serverEnvironmentSchema = z
     SHUTDOWN_GRACE_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
   })
   .superRefine((environment, context) => {
+    if (environment.BOT_RETRY_MAX_MS < environment.BOT_RETRY_BASE_MS) {
+      context.addIssue({
+        code: 'custom',
+        message: 'BOT_RETRY_MAX_MS must be greater than or equal to BOT_RETRY_BASE_MS',
+        path: ['BOT_RETRY_MAX_MS'],
+      });
+    }
+
     if (environment.NODE_ENV !== 'production') {
       return;
     }

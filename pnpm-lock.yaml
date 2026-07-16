@@ -129,6 +129,16 @@ importers:
         version: 4.1.10(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(esbuild@0.28.1)(jsdom@29.1.1)(tsx@4.23.1)
 
   apps/worker:
+    dependencies:
+      '@craft72/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@craft72/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
     devDependencies:
       '@types/node':
         specifier: 22.20.1
@@ -136,6 +146,9 @@ importers:
       typescript:
         specifier: 6.0.3
         version: 6.0.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(esbuild@0.28.1)(jsdom@29.1.1)(tsx@4.23.1)
 
   packages/config:
     dependencies:

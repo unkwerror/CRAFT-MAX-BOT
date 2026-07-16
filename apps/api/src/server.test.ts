@@ -22,10 +22,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ValidatedMaxInitData, VerifiedMaxContact } from './max-auth.js';
+import type { AcceptedMaxWebhook } from './max-webhook.js';
 import type { AuthenticatedSession, Stage3Store } from './repository.js';
 import { buildStage3Api } from './server.js';
 
 const BOT_TOKEN = 'stage-3-server-test-token-with-enough-entropy';
+const WEBHOOK_SECRET = 'stage-4-webhook-secret-with-enough-entropy';
 const NOW = new Date('2026-07-15T10:00:00.000Z');
 const DRAFT_ID = 'a5fd2117-1821-419f-8ed7-6e9b2b9d4133';
 
@@ -65,10 +67,17 @@ interface MutableSession extends AuthenticatedSession {
 
 class MemoryStage3Store implements Stage3Store {
   public ready = true;
+  readonly acceptedWebhooks = new Map<string, AcceptedMaxWebhook>();
   readonly #drafts = new Map<string, LeadDraft>();
   readonly #sessions = new Map<string, MutableSession>();
   readonly #submissions = new Map<string, Submission>();
   #sessionSequence = 0;
+
+  public async acceptMaxWebhook(event: AcceptedMaxWebhook): Promise<boolean> {
+    if (this.acceptedWebhooks.has(event.eventKey)) return false;
+    this.acceptedWebhooks.set(event.eventKey, event);
+    return true;
+  }
 
   public async isReady(): Promise<void> {
     if (!this.ready) throw new Error('database unavailable');
@@ -233,6 +242,7 @@ describe('Stage 3 API', () => {
     app = await buildStage3Api({
       store,
       botToken: BOT_TOKEN,
+      maxWebhookSecret: WEBHOOK_SECRET,
       consentVersion: leadPayload.consent.version,
       initDataMaxAgeSeconds: 3_600,
       contactMaxAgeSeconds: 300,
@@ -259,6 +269,62 @@ describe('Stage 3 API', () => {
     expect(unavailable.statusCode).toBe(503);
     expect(HealthReadyResponseSchema.parse(unavailable.json()).status).toBe('unavailable');
     expect(unavailable.body).not.toContain(BOT_TOKEN);
+  });
+
+  it('authenticates, validates and deduplicates MAX webhooks before acknowledging them', async () => {
+    const payload = {
+      update_type: 'bot_started',
+      timestamp: 1_784_102_400_000,
+      chat_id: 9007199254740991,
+      user: { user_id: 101, first_name: 'Иван' },
+    };
+
+    const missing = await app.inject({ method: 'POST', url: '/webhooks/max', payload });
+    expect(missing.statusCode).toBe(401);
+    expect(missing.body).not.toContain(WEBHOOK_SECRET);
+
+    const wrong = await app.inject({
+      method: 'POST',
+      url: '/webhooks/max',
+      headers: { 'x-max-bot-api-secret': `${WEBHOOK_SECRET}-wrong` },
+      payload,
+    });
+    expect(wrong.statusCode).toBe(401);
+
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        app.inject({
+          method: 'POST',
+          url: '/webhooks/max',
+          headers: { 'x-max-bot-api-secret': WEBHOOK_SECRET },
+          payload,
+        }),
+      ),
+    );
+    expect(responses.every(({ statusCode }) => statusCode === 200)).toBe(true);
+    expect(responses.filter((response) => response.json().duplicate === false)).toHaveLength(1);
+    expect(store.acceptedWebhooks.size).toBe(1);
+    expect([...store.acceptedWebhooks.values()][0]?.chatId).toBe(9007199254740991n);
+  });
+
+  it('accepts forward-compatible webhook types but rejects malformed envelopes', async () => {
+    const unknown = await app.inject({
+      method: 'POST',
+      url: '/webhooks/max',
+      headers: { 'x-max-bot-api-secret': WEBHOOK_SECRET },
+      payload: { update_type: 'future_event', timestamp: 1, future_field: { enabled: true } },
+    });
+    expect(unknown.statusCode).toBe(200);
+    expect(store.acceptedWebhooks.size).toBe(1);
+
+    const malformed = await app.inject({
+      method: 'POST',
+      url: '/webhooks/max',
+      headers: { 'x-max-bot-api-secret': WEBHOOK_SECRET },
+      payload: { update_type: '', timestamp: 'now' },
+    });
+    expect(malformed.statusCode).toBe(400);
+    expect(ApiErrorResponseSchema.parse(malformed.json()).error.code).toBe('VALIDATION_ERROR');
   });
 
   it('rejects forged and malformed MAX authentication safely', async () => {

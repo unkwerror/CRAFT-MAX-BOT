@@ -22,12 +22,14 @@ import {
   maxUsers,
   sessions,
   submissions,
+  webhookInbox,
   type Database,
   type JsonObject,
 } from '@craft72/database';
 import { and, eq, gt, isNull, lte, sql } from 'drizzle-orm';
 
 import type { ValidatedMaxInitData, VerifiedMaxContact } from './max-auth.js';
+import type { AcceptedMaxWebhook } from './max-webhook.js';
 
 export interface AuthenticatedSession {
   readonly consentedAt: Date;
@@ -45,6 +47,7 @@ export interface AuthenticatedSession {
 }
 
 export interface Stage3Store {
+  acceptMaxWebhook(event: AcceptedMaxWebhook): Promise<boolean>;
   authenticate(token: string): Promise<AuthenticatedSession | null>;
   cleanupExpired(): Promise<void>;
   createSession(
@@ -245,6 +248,27 @@ export class PostgresStage3Store implements Stage3Store {
 
   public async isReady(): Promise<void> {
     await this.#database.execute(sql`select 1`);
+  }
+
+  public async acceptMaxWebhook(event: AcceptedMaxWebhook): Promise<boolean> {
+    const now = validNow(this.#now);
+    const inserted = await this.#database
+      .insert(webhookInbox)
+      .values({
+        eventKey: event.eventKey,
+        eventType: event.eventType,
+        chatId: event.chatId,
+        payload: asJsonObject(event.payload),
+        status: 'pending',
+        attempts: 0,
+        nextAttemptAt: now,
+        receivedAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing({ target: webhookInbox.eventKey })
+      .returning({ eventKey: webhookInbox.eventKey });
+
+    return inserted.length === 1;
   }
 
   public async cleanupExpired(): Promise<void> {

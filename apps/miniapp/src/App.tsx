@@ -20,8 +20,14 @@ import {
   MockSubmissionApi,
   MockUploadApi,
 } from './mock/index.js';
-import { getRouteFromHash, routeHref, type AppRoute } from './navigation.js';
+import {
+  getRouteFromHash,
+  getRouteFromStartParam,
+  routeHref,
+  type AppRoute,
+} from './navigation.js';
 import { maxBridge } from './platform/index.js';
+import { maxBotConfiguration } from './runtime/bot-config.js';
 import { privacyConfiguration } from './runtime/privacy-config.js';
 import { BRIEF_TOTAL_STEPS, BriefScreen, type BriefStep } from './screens/BriefScreen.js';
 import { CasesScreen } from './screens/CasesScreen.js';
@@ -223,6 +229,7 @@ export const App = () => {
           setHasActiveDraft(true);
         }
         setRuntimeStatus('connected');
+        navigate(getRouteFromStartParam(authenticated.startParam));
       } catch {
         if (!active || controller.signal.aborted) return;
         serverApi.clearSession();
@@ -236,7 +243,7 @@ export const App = () => {
       controller.abort();
       serverApi.clearSession();
     };
-  }, [initData, privacyAcknowledged, serverApi, shouldUseServer]);
+  }, [initData, navigate, privacyAcknowledged, serverApi, shouldUseServer]);
 
   useEffect(() => {
     const syncRoute = (): void => setRoute(getRouteFromHash(window.location.hash));
@@ -477,6 +484,21 @@ export const App = () => {
     [draft, openBrief, updateDraft],
   );
 
+  const handleOpenManagerChat = useCallback((): void => {
+    if (maxBotConfiguration.url === null) {
+      setToast('Чат с менеджером временно недоступен');
+      return;
+    }
+
+    try {
+      if (!maxBridge.openMaxLink(maxBotConfiguration.url)) {
+        setToast('Не удалось открыть чат с менеджером');
+      }
+    } catch {
+      setToast('Не удалось открыть чат с менеджером');
+    }
+  }, []);
+
   const handleDocumentAdded = useCallback((documentId: string): void => {
     setDraft((current) => ({
       ...current,
@@ -575,7 +597,7 @@ export const App = () => {
             ? {}
             : { draftUpdatedAt: formatDraftTimestamp(savedDraft.updatedAt) })}
           onNavigate={handleNavigation}
-          onSupport={() => setToast('Чат с менеджером будет подключён на этапе настройки MAX-бота')}
+          onSupport={handleOpenManagerChat}
         />
       );
       break;
@@ -675,9 +697,7 @@ export const App = () => {
               navigate('upload');
             }}
             onHome={() => navigate('home')}
-            onOpenChat={() =>
-              setToast('Чат с менеджером будет подключён на этапе настройки MAX-бота')
-            }
+            onOpenChat={handleOpenManagerChat}
             submission={submission}
           />
         );

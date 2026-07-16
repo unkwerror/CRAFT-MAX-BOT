@@ -41,15 +41,24 @@ if [[ -n "${previous_release}" ]]; then
   mv -Tf "${CURRENT_CANDIDATE}" "${CURRENT_LINK}"
 
   if [[ -f "${CURRENT_LINK}/deploy/ecosystem.config.cjs" ]]; then
-    CRAFT72_DEPLOY_ROOT="${DEPLOY_ROOT}" CRAFT72_ENV_FILE="${ENVIRONMENT_FILE}" \
-      pm2 startOrReload "${CURRENT_LINK}/deploy/ecosystem.config.cjs" \
-      --only craft72-max-api --update-env
+    if grep -Fq "craft72-max-worker" "${CURRENT_LINK}/deploy/ecosystem.config.cjs"; then
+      CRAFT72_DEPLOY_ROOT="${DEPLOY_ROOT}" CRAFT72_ENV_FILE="${ENVIRONMENT_FILE}" \
+        pm2 startOrReload "${CURRENT_LINK}/deploy/ecosystem.config.cjs" \
+        --only craft72-max-api,craft72-max-worker --update-env
+    else
+      CRAFT72_DEPLOY_ROOT="${DEPLOY_ROOT}" CRAFT72_ENV_FILE="${ENVIRONMENT_FILE}" \
+        pm2 startOrReload "${CURRENT_LINK}/deploy/ecosystem.config.cjs" \
+        --only craft72-max-api --update-env
+      pm2 delete craft72-max-worker >/dev/null 2>&1 || true
+    fi
   else
     pm2 delete craft72-max-api >/dev/null 2>&1 || true
+    pm2 delete craft72-max-worker >/dev/null 2>&1 || true
   fi
 else
   rm -f -- "${CURRENT_LINK}"
   pm2 delete craft72-max-api >/dev/null 2>&1 || true
+  pm2 delete craft72-max-worker >/dev/null 2>&1 || true
 fi
 
 echo "Application pointer rolled back. Expand-only database migrations were intentionally retained."

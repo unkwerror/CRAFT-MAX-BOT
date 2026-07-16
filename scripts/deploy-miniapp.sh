@@ -17,6 +17,7 @@ DEPLOY_ROOT="${DEPLOY_ROOT:-/home/mun/apps/craft72-max-app}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://craft72app.ru}"
 API_HEALTHCHECK_URL="${API_HEALTHCHECK_URL:-${PUBLIC_BASE_URL}/health/ready}"
 STATIC_HEALTHCHECK_URL="${STATIC_HEALTHCHECK_URL:-${PUBLIC_BASE_URL}/release-id.txt}"
+WEBHOOK_HEALTHCHECK_URL="${WEBHOOK_HEALTHCHECK_URL:-${PUBLIC_BASE_URL}/webhooks/max}"
 
 die() {
   echo "$*" >&2
@@ -50,7 +51,7 @@ upload_archive="${DEPLOY_ROOT}/releases/.upload-${release_id}.tar.gz"
 upload_checksum="${upload_archive}.sha256"
 lock_dir="${DEPLOY_ROOT}/.deploy-lock"
 target="${DEPLOY_USER}@${DEPLOY_HOST}"
-build_root="$(mktemp -d /tmp/craft72-stage3-deploy.XXXXXXXX)"
+build_root="$(mktemp -d /tmp/craft72-stage4-deploy.XXXXXXXX)"
 payload_dir="${build_root}/payload"
 archive_file="${build_root}/${release_id}.tar.gz"
 checksum_file="${archive_file}.sha256"
@@ -85,7 +86,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Reading the two public build settings from the protected server environment..."
+echo "Reading the three public build settings from the protected server environment..."
 if ! public_configuration="$("${ssh_command[@]}" bash -s -- "${DEPLOY_ROOT}/shared/.env" 2>/dev/null <<'REMOTE_CONFIG'
 set -Eeuo pipefail
 [[ "$-" != *x* ]] || exit 2
@@ -99,22 +100,29 @@ fi
 set +a
 : "${PRIVACY_POLICY_URL:?}"
 : "${CONSENT_VERSION:?}"
-[[ "${PRIVACY_POLICY_URL}" != *$'\n'* && "${CONSENT_VERSION}" != *$'\n'* ]] || exit 2
-printf '%s\n%s\n' "${PRIVACY_POLICY_URL}" "${CONSENT_VERSION}"
+: "${MAX_BOT_PUBLIC_NAME:?}"
+[[ "${PRIVACY_POLICY_URL}" != *$'\n'* && "${CONSENT_VERSION}" != *$'\n'* && \
+  "${MAX_BOT_PUBLIC_NAME}" != *$'\n'* ]] || exit 2
+printf '%s\n%s\n%s\n' "${PRIVACY_POLICY_URL}" "${CONSENT_VERSION}" "${MAX_BOT_PUBLIC_NAME}"
 REMOTE_CONFIG
 )"; then
-  die "Could not read the public privacy URL and consent version from the server environment."
+  die "Could not read the public privacy URL, consent version and MAX bot name from the server environment."
 fi
 mapfile -t public_values <<<"${public_configuration}"
-[[ "${#public_values[@]}" -eq 2 ]] || die "Server public build settings are missing or malformed."
+[[ "${#public_values[@]}" -eq 3 ]] || die "Server public build settings are missing or malformed."
 PRIVACY_POLICY_URL="${public_values[0]}"
 CONSENT_VERSION="${public_values[1]}"
+MAX_BOT_PUBLIC_NAME="${public_values[2]}"
 unset public_configuration public_values
 
 [[ "${PRIVACY_POLICY_URL}" == "${PUBLIC_BASE_URL}/privacy.html" ]] ||
   die "PRIVACY_POLICY_URL must be ${PUBLIC_BASE_URL}/privacy.html for this production release."
 [[ "${CONSENT_VERSION}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] ||
   die "CONSENT_VERSION has an invalid format."
+[[ "${MAX_BOT_PUBLIC_NAME}" =~ ^[A-Za-z0-9_]+$ ]] ||
+  die "MAX_BOT_PUBLIC_NAME has an invalid format."
+MAX_BOT_URL="https://max.ru/${MAX_BOT_PUBLIC_NAME}"
+unset MAX_BOT_PUBLIC_NAME
 
 privacy_file="${REPOSITORY_ROOT}/apps/miniapp/public/privacy.html"
 terms_file="${REPOSITORY_ROOT}/apps/miniapp/public/terms.html"
@@ -132,7 +140,7 @@ if migration_violations="$(rg --line-number --ignore-case \
   "${REPOSITORY_ROOT}/packages/database/drizzle" \
   --glob '*.sql' --glob '!**/rollback/**')"; then
   printf '%s\n' "${migration_violations}" >&2
-  die "A forward migration contains a destructive statement. Stage 3 deploy accepts expand-only migrations."
+  die "A forward migration contains a destructive statement. Stage 4 deploy accepts expand-only migrations."
 else
   migration_scan_status=$?
   [[ "${migration_scan_status}" -eq 1 ]] || die "Forward migrations could not be inspected safely."
@@ -142,20 +150,22 @@ unset migration_violations migration_scan_status
 echo "Installing and building committed sources..."
 (
   cd "${REPOSITORY_ROOT}"
-  corepack pnpm install --frozen-lockfile
-  corepack pnpm --filter @craft72/api... --if-present run build
+  NODE_ENV=development corepack pnpm install --frozen-lockfile
+  corepack pnpm --filter @craft72/api... --filter @craft72/worker... --if-present run build
   VITE_PRIVACY_POLICY_URL="${PRIVACY_POLICY_URL}" \
     VITE_CONSENT_VERSION="${CONSENT_VERSION}" \
+    VITE_MAX_BOT_URL="${MAX_BOT_URL}" \
     corepack pnpm --filter @craft72/miniapp build
 )
-unset PRIVACY_POLICY_URL CONSENT_VERSION
+unset PRIVACY_POLICY_URL CONSENT_VERSION MAX_BOT_URL
 
 [[ -s "${REPOSITORY_ROOT}/apps/miniapp/dist/index.html" ]] || die "Mini App build did not produce index.html."
 [[ -s "${REPOSITORY_ROOT}/apps/miniapp/dist/privacy.html" ]] || die "Mini App build did not include privacy.html."
 [[ -s "${REPOSITORY_ROOT}/apps/miniapp/dist/terms.html" ]] || die "Mini App build did not include terms.html."
 [[ -s "${REPOSITORY_ROOT}/apps/api/dist/index.js" ]] || die "API build did not produce dist/index.js."
+[[ -s "${REPOSITORY_ROOT}/apps/worker/dist/index.js" ]] || die "Worker build did not produce dist/index.js."
 
-mkdir -p "${payload_dir}/api" "${payload_dir}/deploy" "${payload_dir}/scripts"
+mkdir -p "${payload_dir}/api" "${payload_dir}/worker" "${payload_dir}/deploy" "${payload_dir}/scripts"
 cp -a "${REPOSITORY_ROOT}/apps/miniapp/dist/." "${payload_dir}/"
 
 echo "Creating a portable production API package..."
@@ -163,8 +173,14 @@ echo "Creating a portable production API package..."
   cd "${REPOSITORY_ROOT}"
   corepack pnpm --filter @craft72/api deploy --prod --legacy "${payload_dir}/api"
 )
+echo "Creating a portable production worker package..."
+(
+  cd "${REPOSITORY_ROOT}"
+  corepack pnpm --filter @craft72/worker deploy --prod --legacy "${payload_dir}/worker"
+)
 cp -a "${REPOSITORY_ROOT}/deploy/." "${payload_dir}/deploy/"
 cp -a "${REPOSITORY_ROOT}/scripts/cleanup-stage3-retention.sh" "${payload_dir}/scripts/"
+cp -a "${REPOSITORY_ROOT}/scripts/max-webhook-subscription.sh" "${payload_dir}/scripts/"
 cp -a "${REPOSITORY_ROOT}/deploy/run-migrations.mjs" "${payload_dir}/api/run-migrations.mjs"
 printf '%s\n' "${release_id}" >"${payload_dir}/release-id.txt"
 printf '%s\n' "${git_revision}" >"${payload_dir}/git-revision.txt"
@@ -183,7 +199,7 @@ fi
 lock_acquired=true
 
 "${ssh_command[@]}" "test ! -e '${release_dir}' && test ! -e '${incoming_dir}'"
-echo "Uploading immutable Stage 3 release ${release_id}..."
+echo "Uploading immutable Stage 4 release ${release_id}..."
 "${scp_command[@]}" "${archive_file}" "${target}:${upload_archive}"
 "${scp_command[@]}" "${checksum_file}" "${target}:${upload_checksum}"
 
@@ -208,6 +224,7 @@ test -s "${incoming_dir}/index.html"
 test -s "${incoming_dir}/privacy.html"
 test -s "${incoming_dir}/terms.html"
 test -s "${incoming_dir}/api/dist/index.js"
+test -s "${incoming_dir}/worker/dist/index.js"
 test -s "${incoming_dir}/deploy/activate-stage3.sh"
 REMOTE_UNPACK
 
@@ -215,12 +232,17 @@ echo "Backing up the database, applying expand-only migrations and switching ato
 "${ssh_command[@]}" \
   "bash '${incoming_dir}/deploy/activate-stage3.sh' '${DEPLOY_ROOT}' '${release_id}'"
 
-echo "Checking public static and API endpoints..."
+echo "Checking public static, API and webhook endpoints..."
 healthy=false
 for _attempt in 1 2 3 4 5 6 7 8 9 10; do
   observed_release="$(curl --fail --silent --show-error --max-time 10 "${STATIC_HEALTHCHECK_URL}" || true)"
   api_status="$(curl --fail --silent --show-error --max-time 10 "${API_HEALTHCHECK_URL}" || true)"
-  if [[ "${observed_release}" == "${release_id}" && "${api_status}" == *'"status":"ok"'* ]]; then
+  webhook_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
+    --request POST --header 'Content-Type: application/json' \
+    --data '{"update_type":"deployment_probe","timestamp":0}' \
+    "${WEBHOOK_HEALTHCHECK_URL}" || true)"
+  if [[ "${observed_release}" == "${release_id}" && "${api_status}" == *'"status":"ok"'* && \
+    "${webhook_status}" == "401" ]]; then
     healthy=true
     break
   fi
@@ -240,3 +262,4 @@ lock_acquired=false
 echo "Deployed ${release_id}."
 echo "Static: ${STATIC_HEALTHCHECK_URL}"
 echo "API: ${API_HEALTHCHECK_URL}"
+echo "Webhook: ${WEBHOOK_HEALTHCHECK_URL}"

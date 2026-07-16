@@ -59,6 +59,27 @@ export const webhookInboxStatusEnum = pgEnum('webhook_inbox_status', [
   'dead_letter',
 ]);
 
+export const botDialogStatusEnum = pgEnum('bot_dialog_status', ['active', 'stopped']);
+
+export const botInquiryStatusEnum = pgEnum('bot_inquiry_status', [
+  'received',
+  'forwarded',
+  'closed',
+]);
+
+export const maxBotOutboxActionEnum = pgEnum('max_bot_outbox_action', [
+  'send_message',
+  'answer_callback',
+]);
+
+export const maxBotOutboxStatusEnum = pgEnum('max_bot_outbox_status', [
+  'pending',
+  'processing',
+  'retry',
+  'completed',
+  'dead_letter',
+]);
+
 export const integrationOperationEnum = pgEnum('integration_operation', [
   'upsert_partner',
   'create_crm',
@@ -437,6 +458,123 @@ export const webhookInbox = pgTable(
   ],
 );
 
+export const botDialogs = pgTable(
+  'bot_dialogs',
+  {
+    chatId: bigint('chat_id', { mode: 'bigint' }).primaryKey(),
+    maxUserId: bigint('max_user_id', { mode: 'bigint' }),
+    status: botDialogStatusEnum('status').default('active').notNull(),
+    lastEventAt: timestamp('last_event_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('bot_dialogs_max_user_id_idx')
+      .on(table.maxUserId)
+      .where(sql`${table.maxUserId} is not null`),
+    check('bot_dialogs_chat_id_nonzero', sql`${table.chatId} <> 0`),
+    check(
+      'bot_dialogs_max_user_id_positive',
+      sql`${table.maxUserId} is null or ${table.maxUserId} > 0`,
+    ),
+  ],
+);
+
+export const botInquiries = pgTable(
+  'bot_inquiries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    eventKey: varchar('event_key', { length: 255 }).notNull(),
+    chatId: bigint('chat_id', { mode: 'bigint' })
+      .notNull()
+      .references(() => botDialogs.chatId, { onDelete: 'restrict', onUpdate: 'cascade' }),
+    maxUserId: bigint('max_user_id', { mode: 'bigint' }),
+    messageId: varchar('message_id', { length: 255 }),
+    bodyText: text('body_text').notNull(),
+    status: botInquiryStatusEnum('status').default('received').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    unique('bot_inquiries_event_key_unique').on(table.eventKey),
+    uniqueIndex('bot_inquiries_message_id_uidx')
+      .on(table.messageId)
+      .where(sql`${table.messageId} is not null`),
+    index('bot_inquiries_chat_created_at_idx').on(table.chatId, table.createdAt),
+    index('bot_inquiries_status_created_at_idx').on(table.status, table.createdAt),
+    check('bot_inquiries_event_key_not_blank', sql`char_length(btrim(${table.eventKey})) > 0`),
+    check(
+      'bot_inquiries_max_user_id_positive',
+      sql`${table.maxUserId} is null or ${table.maxUserId} > 0`,
+    ),
+    check(
+      'bot_inquiries_message_id_not_blank',
+      sql`${table.messageId} is null or char_length(btrim(${table.messageId})) > 0`,
+    ),
+    check('bot_inquiries_body_text_not_blank', sql`char_length(btrim(${table.bodyText})) > 0`),
+  ],
+);
+
+export const maxBotOutbox = pgTable(
+  'max_bot_outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    eventKey: varchar('event_key', { length: 255 }).notNull(),
+    actionKey: varchar('action_key', { length: 255 }).notNull(),
+    action: maxBotOutboxActionEnum('action').notNull(),
+    chatId: bigint('chat_id', { mode: 'bigint' }).references(() => botDialogs.chatId, {
+      onDelete: 'restrict',
+      onUpdate: 'cascade',
+    }),
+    payload: jsonb('payload').$type<JsonObject>().default(emptyJsonObject).notNull(),
+    providerMessageId: varchar('provider_message_id', { length: 255 }),
+    status: maxBotOutboxStatusEnum('status').default('pending').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow().notNull(),
+    lastErrorCode: varchar('last_error_code', { length: 128 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    unique('max_bot_outbox_action_key_unique').on(table.actionKey),
+    uniqueIndex('max_bot_outbox_provider_message_id_uidx')
+      .on(table.providerMessageId)
+      .where(sql`${table.providerMessageId} is not null`),
+    index('max_bot_outbox_ready_idx')
+      .on(table.status, table.nextAttemptAt, table.createdAt)
+      .where(sql`${table.status} in ('pending', 'retry')`),
+    index('max_bot_outbox_chat_order_idx').on(table.chatId, table.createdAt, table.id),
+    check('max_bot_outbox_event_key_not_blank', sql`char_length(btrim(${table.eventKey})) > 0`),
+    check('max_bot_outbox_action_key_not_blank', sql`char_length(btrim(${table.actionKey})) > 0`),
+    check('max_bot_outbox_payload_object', sql`jsonb_typeof(${table.payload}) = 'object'`),
+    check(
+      'max_bot_outbox_provider_message_id_not_blank',
+      sql`${table.providerMessageId} is null or char_length(btrim(${table.providerMessageId})) > 0`,
+    ),
+    check('max_bot_outbox_attempts_nonnegative', sql`${table.attempts} >= 0`),
+    check(
+      'max_bot_outbox_chat_id_matches_action',
+      sql`(${table.action} = 'send_message' and ${table.chatId} is not null)
+        or ${table.action} = 'answer_callback'`,
+    ),
+    check(
+      'max_bot_outbox_completed_at_matches_status',
+      sql`(${table.status} = 'completed' and ${table.completedAt} is not null)
+        or (${table.status} <> 'completed' and ${table.completedAt} is null)`,
+    ),
+  ],
+);
+
 export const integrationOutbox = pgTable(
   'integration_outbox',
   {
@@ -486,6 +624,25 @@ export const maxUsersRelations = relations(maxUsers, ({ many }) => ({
   leadDrafts: many(leadDrafts),
   submissions: many(submissions),
   documents: many(documents),
+}));
+
+export const botDialogsRelations = relations(botDialogs, ({ many }) => ({
+  inquiries: many(botInquiries),
+  outboundActions: many(maxBotOutbox),
+}));
+
+export const botInquiriesRelations = relations(botInquiries, ({ one }) => ({
+  dialog: one(botDialogs, {
+    fields: [botInquiries.chatId],
+    references: [botDialogs.chatId],
+  }),
+}));
+
+export const maxBotOutboxRelations = relations(maxBotOutbox, ({ one }) => ({
+  dialog: one(botDialogs, {
+    fields: [maxBotOutbox.chatId],
+    references: [botDialogs.chatId],
+  }),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({

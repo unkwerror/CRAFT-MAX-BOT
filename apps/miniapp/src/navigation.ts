@@ -1,3 +1,5 @@
+import type { StartParam } from '@craft72/contracts/source';
+
 export const APP_ROUTES = [
   'home',
   'finder',
@@ -19,3 +21,18 @@ export const getRouteFromHash = (hash: string): AppRoute => {
 };
 
 export const routeHref = (route: AppRoute): string => `#${route}`;
+
+export const getRouteFromStartParam = (startParam: StartParam | null): AppRoute => {
+  switch (startParam) {
+    case 'new_project':
+      return 'brief';
+    case 'services':
+      return 'finder';
+    case 'portfolio':
+      return 'cases';
+    case 'upload_brief':
+      return 'upload';
+    default:
+      return 'home';
+  }
+};

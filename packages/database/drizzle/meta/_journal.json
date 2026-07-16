@@ -15,6 +15,13 @@
       "when": 1784108206383,
       "tag": "0001_stage3_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784168006516,
+      "tag": "0002_stage4_bot_webhook",
+      "breakpoints": true
     }
   ]
 }

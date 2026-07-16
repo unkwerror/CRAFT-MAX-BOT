@@ -47,7 +47,7 @@ configure_libpq_environment() {
   unset DATABASE_URL
 }
 
-for command_name in curl node pg_dump pm2 readlink; do
+for command_name in curl grep node pg_dump pm2 readlink; do
   command -v "${command_name}" >/dev/null || {
     echo "Required server command is missing: ${command_name}." >&2
     exit 2
@@ -90,23 +90,32 @@ rollback_on_error() {
       ln -s "${previous_release}" "${CURRENT_CANDIDATE}"
       mv -Tf "${CURRENT_CANDIDATE}" "${CURRENT_LINK}"
       if [[ -f "${CURRENT_LINK}/deploy/ecosystem.config.cjs" ]]; then
-        CRAFT72_DEPLOY_ROOT="${DEPLOY_ROOT}" CRAFT72_ENV_FILE="${ENVIRONMENT_FILE}" \
-          pm2 startOrReload "${CURRENT_LINK}/deploy/ecosystem.config.cjs" \
-          --only craft72-max-api --update-env >/dev/null
+        if grep -Fq "craft72-max-worker" "${CURRENT_LINK}/deploy/ecosystem.config.cjs"; then
+          CRAFT72_DEPLOY_ROOT="${DEPLOY_ROOT}" CRAFT72_ENV_FILE="${ENVIRONMENT_FILE}" \
+            pm2 startOrReload "${CURRENT_LINK}/deploy/ecosystem.config.cjs" \
+            --only craft72-max-api,craft72-max-worker --update-env >/dev/null
+        else
+          CRAFT72_DEPLOY_ROOT="${DEPLOY_ROOT}" CRAFT72_ENV_FILE="${ENVIRONMENT_FILE}" \
+            pm2 startOrReload "${CURRENT_LINK}/deploy/ecosystem.config.cjs" \
+            --only craft72-max-api --update-env >/dev/null
+          pm2 delete craft72-max-worker >/dev/null 2>&1 || true
+        fi
       else
         pm2 delete craft72-max-api >/dev/null 2>&1 || true
+        pm2 delete craft72-max-worker >/dev/null 2>&1 || true
       fi
     else
       if [[ "$(readlink "${CURRENT_LINK}" 2>/dev/null)" == "releases/${RELEASE_ID}" ]]; then
         rm -f -- "${CURRENT_LINK}"
       fi
       pm2 delete craft72-max-api >/dev/null 2>&1 || true
+      pm2 delete craft72-max-worker >/dev/null 2>&1 || true
     fi
   fi
 
   rm -f -- "${CURRENT_CANDIDATE}"
 
-  echo "Stage 3 activation failed; the previous application pointer was restored." >&2
+  echo "Stage 4 activation failed; the previous application pointer was restored." >&2
   exit "${status}"
 }
 trap rollback_on_error ERR
@@ -144,15 +153,17 @@ echo "Applying all pending reviewed migrations before the release switch..."
   NODE_ENV=production node run-migrations.mjs
 )
 
-chmod -R go-rwx "${INCOMING_DIR}/api" "${INCOMING_DIR}/deploy" "${INCOMING_DIR}/scripts"
+chmod -R go-rwx "${INCOMING_DIR}/api" "${INCOMING_DIR}/worker" "${INCOMING_DIR}/deploy" "${INCOMING_DIR}/scripts"
 find "${INCOMING_DIR}" \
-  \( -path "${INCOMING_DIR}/api" -o -path "${INCOMING_DIR}/deploy" -o -path "${INCOMING_DIR}/scripts" \) \
+  \( -path "${INCOMING_DIR}/api" -o -path "${INCOMING_DIR}/worker" -o -path "${INCOMING_DIR}/deploy" -o -path "${INCOMING_DIR}/scripts" \) \
   -prune -o -type d -exec chmod 755 {} +
 find "${INCOMING_DIR}" \
-  \( -path "${INCOMING_DIR}/api" -o -path "${INCOMING_DIR}/deploy" -o -path "${INCOMING_DIR}/scripts" \) \
+  \( -path "${INCOMING_DIR}/api" -o -path "${INCOMING_DIR}/worker" -o -path "${INCOMING_DIR}/deploy" -o -path "${INCOMING_DIR}/scripts" \) \
   -prune -o -type f -exec chmod 644 {} +
-chmod 750 "${INCOMING_DIR}/deploy/start-api.sh" "${INCOMING_DIR}/deploy/activate-stage3.sh" \
-  "${INCOMING_DIR}/deploy/rollback-stage3.sh" "${INCOMING_DIR}/scripts/cleanup-stage3-retention.sh"
+chmod 750 "${INCOMING_DIR}/deploy/start-api.sh" "${INCOMING_DIR}/deploy/start-worker.sh" \
+  "${INCOMING_DIR}/deploy/activate-stage3.sh" \
+  "${INCOMING_DIR}/deploy/rollback-stage3.sh" "${INCOMING_DIR}/scripts/cleanup-stage3-retention.sh" \
+  "${INCOMING_DIR}/scripts/max-webhook-subscription.sh"
 chmod 751 "${INCOMING_DIR}"
 mv "${INCOMING_DIR}" "${RELEASE_DIR}"
 
@@ -160,10 +171,10 @@ ln -s "releases/${RELEASE_ID}" "${CURRENT_CANDIDATE}"
 mv -Tf "${CURRENT_CANDIDATE}" "${CURRENT_LINK}"
 switched=true
 
-echo "Starting or reloading only craft72-max-api..."
+echo "Starting or reloading only the CRAFT72 API and worker..."
 CRAFT72_DEPLOY_ROOT="${DEPLOY_ROOT}" CRAFT72_ENV_FILE="${ENVIRONMENT_FILE}" \
   pm2 startOrReload "${CURRENT_LINK}/deploy/ecosystem.config.cjs" \
-  --only craft72-max-api --update-env
+  --only craft72-max-api,craft72-max-worker --update-env
 
 ready=false
 for _attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
@@ -176,6 +187,17 @@ for _attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   sleep 2
 done
 [[ "${ready}" == true ]] || false
+worker_pid="$(pm2 pid craft72-max-worker 2>/dev/null || true)"
+[[ "${worker_pid}" =~ ^[1-9][0-9]*$ ]] || {
+  echo "The CRAFT72 worker is not online." >&2
+  false
+}
+sleep 11
+stable_worker_pid="$(pm2 pid craft72-max-worker 2>/dev/null || true)"
+[[ "${stable_worker_pid}" == "${worker_pid}" ]] || {
+  echo "The CRAFT72 worker did not remain stable through its minimum uptime window." >&2
+  false
+}
 
 trap - ERR
-echo "Release ${RELEASE_ID} is ready on the loopback API endpoint."
+echo "Release ${RELEASE_ID} is ready; the loopback API and worker are online."

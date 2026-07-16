@@ -90,7 +90,7 @@ if [[ "${1:-}" != "--force" && -s "${LAST_RUN_FILE}" ]]; then
   fi
 fi
 
-echo "Applying the configured Stage 3 retention windows..."
+echo "Applying the configured Stage 4 retention windows..."
 psql --no-psqlrc --set=ON_ERROR_STOP=1 \
   --set="submission_days=${SUBMISSION_RETENTION_DAYS}" \
   --set="log_days=${LOG_RETENTION_DAYS}" <<'RETENTION_SQL'
@@ -98,8 +98,34 @@ BEGIN;
 DELETE FROM lead_drafts WHERE expires_at <= clock_timestamp();
 DELETE FROM sessions
  WHERE expires_at < clock_timestamp() - make_interval(days => :log_days);
+DELETE FROM max_bot_outbox
+ WHERE status IN ('completed', 'dead_letter')
+   AND COALESCE(completed_at, updated_at) <
+     clock_timestamp() - make_interval(days => :log_days);
+DELETE FROM bot_inquiries
+ WHERE created_at < clock_timestamp() - make_interval(days => :submission_days);
 DELETE FROM webhook_inbox
- WHERE received_at < clock_timestamp() - make_interval(days => :log_days);
+ WHERE status IN ('processed', 'dead_letter')
+   AND COALESCE(processed_at, updated_at) <
+     clock_timestamp() - make_interval(days => :log_days);
+DELETE FROM bot_dialogs AS candidate
+ WHERE GREATEST(candidate.last_event_at, candidate.updated_at) <
+     clock_timestamp() - make_interval(days => :log_days)
+   AND NOT EXISTS (
+     SELECT 1
+       FROM bot_inquiries
+      WHERE bot_inquiries.chat_id = candidate.chat_id
+   )
+   AND NOT EXISTS (
+     SELECT 1
+       FROM max_bot_outbox
+      WHERE max_bot_outbox.chat_id = candidate.chat_id
+   )
+   AND NOT EXISTS (
+     SELECT 1
+       FROM webhook_inbox
+      WHERE webhook_inbox.chat_id = candidate.chat_id
+   );
 DELETE FROM integration_outbox
  WHERE completed_at IS NOT NULL
    AND completed_at < clock_timestamp() - make_interval(days => :log_days);

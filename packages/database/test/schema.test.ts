@@ -2,10 +2,17 @@ import { getTableConfig } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
 import {
+  botDialogStatusEnum,
+  botDialogs,
+  botInquiries,
+  botInquiryStatusEnum,
   documents,
   integrationOperationEnum,
   integrationOutbox,
   leadDrafts,
+  maxBotOutbox,
+  maxBotOutboxActionEnum,
+  maxBotOutboxStatusEnum,
   maxUsers,
   sessions,
   submissions,
@@ -21,6 +28,9 @@ describe('database schema', () => {
       submissions,
       documents,
       webhookInbox,
+      botDialogs,
+      botInquiries,
+      maxBotOutbox,
       integrationOutbox,
     ].map((table) => getTableConfig(table).name);
 
@@ -31,6 +41,9 @@ describe('database schema', () => {
       'submissions',
       'documents',
       'webhook_inbox',
+      'bot_dialogs',
+      'bot_inquiries',
+      'max_bot_outbox',
       'integration_outbox',
     ]);
   });
@@ -42,10 +55,24 @@ describe('database schema', () => {
     const outboxConstraints = getTableConfig(integrationOutbox).uniqueConstraints.map(
       ({ name }) => name,
     );
+    const inquiryConstraints = getTableConfig(botInquiries).uniqueConstraints.map(
+      ({ name }) => name,
+    );
+    const botOutboxConstraints = getTableConfig(maxBotOutbox).uniqueConstraints.map(
+      ({ name }) => name,
+    );
+    const inquiryIndexes = getTableConfig(botInquiries).indexes.map(({ config: { name } }) => name);
+    const botOutboxIndexes = getTableConfig(maxBotOutbox).indexes.map(
+      ({ config: { name } }) => name,
+    );
 
     expect(submissionConstraints).toContain('submissions_user_idempotency_key_unique');
     expect(outboxConstraints).toContain('integration_outbox_idempotency_key_unique');
     expect(outboxConstraints).toContain('integration_outbox_submission_operation_unique');
+    expect(inquiryConstraints).toContain('bot_inquiries_event_key_unique');
+    expect(botOutboxConstraints).toContain('max_bot_outbox_action_key_unique');
+    expect(inquiryIndexes).toContain('bot_inquiries_message_id_uidx');
+    expect(botOutboxIndexes).toContain('max_bot_outbox_provider_message_id_uidx');
     expect(getTableConfig(webhookInbox).primaryKeys).toHaveLength(0);
     expect(webhookInbox.eventKey.primary).toBe(true);
   });
@@ -58,12 +85,74 @@ describe('database schema', () => {
     ]);
   });
 
+  it('limits durable bot state and actions to the approved Stage 4 values', () => {
+    expect(botDialogStatusEnum.enumValues).toEqual(['active', 'stopped']);
+    expect(botInquiryStatusEnum.enumValues).toEqual(['received', 'forwarded', 'closed']);
+    expect(maxBotOutboxActionEnum.enumValues).toEqual(['send_message', 'answer_callback']);
+    expect(maxBotOutboxStatusEnum.enumValues).toEqual([
+      'pending',
+      'processing',
+      'retry',
+      'completed',
+      'dead_letter',
+    ]);
+  });
+
   it('keeps all required ownership foreign keys in the schema', () => {
     expect(getTableConfig(sessions).foreignKeys).toHaveLength(1);
     expect(getTableConfig(leadDrafts).foreignKeys).toHaveLength(1);
     expect(getTableConfig(submissions).foreignKeys).toHaveLength(1);
     expect(getTableConfig(documents).foreignKeys).toHaveLength(2);
     expect(getTableConfig(integrationOutbox).foreignKeys).toHaveLength(1);
+    expect(getTableConfig(botDialogs).foreignKeys).toHaveLength(0);
+    expect(getTableConfig(botInquiries).foreignKeys).toHaveLength(1);
+    expect(getTableConfig(maxBotOutbox).foreignKeys).toHaveLength(1);
+    expect(getTableConfig(webhookInbox).foreignKeys).toHaveLength(0);
+  });
+
+  it('stores nullable bot identities without coupling bot retention to MAX users', () => {
+    const dialogChecks = getTableConfig(botDialogs).checks.map(({ name }) => name);
+
+    expect(botDialogs.chatId.primary).toBe(true);
+    expect(botDialogs.maxUserId.notNull).toBe(false);
+    expect(botInquiries.chatId.notNull).toBe(true);
+    expect(botInquiries.maxUserId.notNull).toBe(false);
+    expect(botInquiries.messageId.notNull).toBe(false);
+    expect(maxBotOutbox.chatId.notNull).toBe(false);
+    expect(maxBotOutbox.providerMessageId.notNull).toBe(false);
+    expect(maxBotOutbox.providerMessageId.getSQLType()).toBe('varchar(255)');
+    expect(getTableConfig(botDialogs).foreignKeys).toHaveLength(0);
+    expect(dialogChecks).toContain('bot_dialogs_chat_id_nonzero');
+  });
+
+  it('enforces durable inquiry and outbound action invariants', () => {
+    const inquiryConfig = getTableConfig(botInquiries);
+    const outboxConfig = getTableConfig(maxBotOutbox);
+    const inquiryChecks = inquiryConfig.checks.map(({ name }) => name);
+    const outboxChecks = outboxConfig.checks.map(({ name }) => name);
+    const outboxIndexes = outboxConfig.indexes.map(({ config: { name } }) => name);
+
+    expect(inquiryChecks).toEqual(
+      expect.arrayContaining([
+        'bot_inquiries_event_key_not_blank',
+        'bot_inquiries_message_id_not_blank',
+        'bot_inquiries_body_text_not_blank',
+      ]),
+    );
+    expect(outboxChecks).toEqual(
+      expect.arrayContaining([
+        'max_bot_outbox_event_key_not_blank',
+        'max_bot_outbox_action_key_not_blank',
+        'max_bot_outbox_payload_object',
+        'max_bot_outbox_provider_message_id_not_blank',
+        'max_bot_outbox_attempts_nonnegative',
+        'max_bot_outbox_chat_id_matches_action',
+        'max_bot_outbox_completed_at_matches_status',
+      ]),
+    );
+    expect(outboxIndexes).toEqual(
+      expect.arrayContaining(['max_bot_outbox_ready_idx', 'max_bot_outbox_chat_order_idx']),
+    );
   });
 
   it('persists a verified contact only as a consistent server session snapshot', () => {

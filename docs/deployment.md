@@ -1,9 +1,9 @@
 # Deployment
 
-Stage 3 is deployed manually; the repository intentionally has no GitHub Actions workflow. The
-deployment unit contains the built Mini App, the portable production API package, reviewed database
-migrations and process-management helpers. A release is immutable after it is placed under
-`/home/mun/apps/craft72-max-app/releases`.
+Stage 4 is deployed manually; the repository intentionally has no GitHub Actions workflow. The
+deployment unit contains the built Mini App, portable production API and worker packages, reviewed
+database migrations and process-management helpers. A release is immutable after it is placed
+under `/home/mun/apps/craft72-max-app/releases`.
 
 ## One-time server preparation
 
@@ -25,22 +25,88 @@ Create a dedicated PostgreSQL database and login role. Enter the generated passw
 do not put it in shell history. Grant this role no access to unrelated databases. Put the resulting
 PostgreSQL URL only in `shared/.env` and keep the file owned by `mun` with mode `600`.
 
-The production env must include the Stage 3 runtime settings and these public build settings:
+The production env must include the Stage 3 runtime settings, the Stage 4 MAX worker settings from
+`.env.example`, and the following nonsecret build, retention and worker values:
 
 ```dotenv
 PUBLIC_BASE_URL=https://craft72app.ru
 PRIVACY_POLICY_URL=https://craft72app.ru/privacy.html
-CONSENT_VERSION=miniapp-2026-07-15
+CONSENT_VERSION=miniapp-2026-07-16
 API_HOST=127.0.0.1
 API_PORT=4100
+MAX_BOT_PUBLIC_NAME=<BOT_PUBLIC_NAME>
 SUBMISSION_RETENTION_DAYS=1095
 LOG_RETENTION_DAYS=90
 BACKUP_RETENTION_DAYS=30
 RETENTION_CLEANUP_INTERVAL_SECONDS=21600
+MAX_API_TIMEOUT_MS=10000
+BOT_WORKER_POLL_INTERVAL_MS=500
+BOT_WORKER_LEASE_SECONDS=60
+BOT_WORKER_MAX_ATTEMPTS=8
+BOT_RETRY_BASE_MS=1000
+BOT_RETRY_MAX_MS=300000
 ```
 
-The same protected file contains `DATABASE_URL`, MAX credentials and other server-only values. None
-of those values belong in `VITE_*`, a release archive, Git or deployment logs.
+The same protected file contains `DATABASE_URL`, `MAX_BOT_TOKEN`, `MAX_WEBHOOK_SECRET` and other
+server-only values. Use a distinct random webhook secret accepted by the MAX subscription API.
+None of those values belong in `VITE_*`, a release archive, Git or deployment logs. Tracker
+credentials may be reserved in the file, but Stage 4 does not use them: Tracker discovery and
+synchronization are Stage 6.
+
+`MAX_BOT_PUBLIC_NAME` is the public MAX bot username returned by `GET /me`, not the Mini App URL or
+`PUBLIC_BASE_URL`. Keep it in the protected env with the rest of the validated runtime
+configuration, even though the username itself is public.
+
+### Verify the MAX API trust chain
+
+The worker launcher sets `NODE_USE_SYSTEM_CA=1`, so the host system trust store must trust Russian
+Trusted Root CA before the worker can call `platform-api2.max.ru`. Download the root certificate
+only through the official [Gosuslugi certificate page](https://www.gosuslugi.ru/crt) or an official
+Ministry of Digital Development publication. Do not use a mirror, `curl -k`, or an instruction that
+disables TLS verification.
+
+Before installation, inspect the certificate and compare its SHA-256 fingerprint with the reviewed
+value. The currently approved root fingerprint is
+`D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31`.
+If the official source announces a replacement, stop and update this runbook through a reviewed
+change instead of accepting a different fingerprint ad hoc.
+
+```bash
+certificate=/path/to/russian_trusted_root_ca.cer
+x509_format=()
+if ! openssl x509 -in "$certificate" -noout >/dev/null 2>&1; then
+  x509_format=(-inform DER)
+fi
+umask 077
+normalized=$(mktemp)
+trap 'rm -f -- "$normalized"' EXIT
+openssl x509 "${x509_format[@]}" -in "$certificate" -out "$normalized"
+openssl x509 -in "$normalized" -noout -subject -issuer -dates -fingerprint -sha256
+expected='D2:6D:2D:02:31:B7:C3:9F:92:CC:73:85:12:BA:54:10:35:19:E4:40:5D:68:B5:BD:70:3E:97:88:CA:8E:CF:31'
+actual=$(openssl x509 -in "$normalized" -noout -fingerprint -sha256 |
+  sed 's/^sha256 Fingerprint=//')
+test "$actual" = "$expected"
+sudo install -m 644 -o root -g root "$normalized" \
+  /usr/local/share/ca-certificates/russian-trusted-root-ca.crt
+sudo update-ca-certificates
+```
+
+The production host is expected to be provisioned already; verification is still mandatory before
+a Stage 4 deploy and after any OS/CA-store change. Test Node's actual TLS path without a bot token:
+
+```bash
+NODE_USE_SYSTEM_CA=1 node --input-type=module -e '
+const response = await fetch("https://platform-api2.max.ru/me", {
+  redirect: "error",
+  signal: AbortSignal.timeout(10000),
+});
+await response.body?.cancel();
+console.log(`MAX TLS trust OK (HTTP ${response.status})`);
+'
+```
+
+Any HTTP status proves that TLS hostname and chain verification completed; a TLS exception blocks
+deployment. Never work around it with `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 
 ### Merge the Nginx include
 
@@ -70,17 +136,28 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-The include proxies the exact `/api/` and `/health/` prefixes to `127.0.0.1:4100`, keeps the static
-release root, blocks release-internal directories and permits the official MAX bridge script from
-`https://st.max.ru` in its CSP. `privacy.html` and release markers are never cached, portfolio
-images have a bounded seven-day cache, and Vite's content-hashed assets are immutable.
+Installing this Stage 4 snippet before deployment is mandatory. The previously installed Stage 3
+snippet has no webhook proxy; if it remains active, the deployment's unauthenticated webhook probe
+will not return 401 and the guarded release switch will roll back. Confirm the rendered config
+contains `location = /webhooks/max` before running the deployment script.
+
+The include proxies the exact `/api/` and `/health/` prefixes and the exact
+`POST /webhooks/max` endpoint to `127.0.0.1:4100`. Other `/webhooks/` paths return 404, and the MAX
+request body is capped at 256 KiB. It keeps the static release root, blocks release-internal
+directories and permits the official MAX bridge script from `https://st.max.ru` in its CSP.
+`privacy.html`, `terms.html` and release markers are never cached, portfolio images have a bounded
+seven-day cache, and Vite's content-hashed assets are immutable.
 
 Install the application-specific logrotate example after confirming `LOG_RETENTION_DAYS=90`:
 
 ```bash
 sudo install -m 644 deploy/logrotate/craft72-max-api /etc/logrotate.d/craft72-max-api
 sudo logrotate --debug /etc/logrotate.d/craft72-max-api
+sudo grep -F '/home/mun/apps/craft72-max-app/shared/logs/worker.log' \
+  /etc/logrotate.d/craft72-max-api
 ```
+
+Replace the prior Stage 3 logrotate file before deployment; it does not cover the new worker output.
 
 ## Deploy a release
 
@@ -93,18 +170,23 @@ From a clean, committed local checkout, run:
 The script performs the following guarded sequence:
 
 1. refuses a dirty worktree or shell tracing;
-2. reads only `PRIVACY_POLICY_URL` and `CONSENT_VERSION` from the protected server env, validates
-   `public/privacy.html`, and maps them to `VITE_PRIVACY_POLICY_URL` and
-   `VITE_CONSENT_VERSION` for the Mini App build;
-3. installs the committed lockfile, builds API dependencies and creates a portable production API;
+2. reads only the explicitly allow-listed public build values from the protected server env,
+   validates the published privacy and terms documents, and maps only public values to `VITE_*`;
+3. installs the committed lockfile, builds the Mini App, API and worker, then creates portable
+   production packages for both server processes;
 4. rejects destructive forward SQL, creates a checksummed immutable archive and acquires a
    server-side deployment lock;
 5. creates a custom-format PostgreSQL backup, applies all pending Drizzle migrations before the
    switch, and never runs a down migration during deployment;
 6. atomically changes only the `current` symlink and runs PM2 `startOrReload --only
-craft72-max-api --update-env` without `pm2 save`;
-7. checks loopback readiness, then the public API and exact public release marker. A failure restores
-   the previous pointer and reloads or removes only `craft72-max-api`.
+craft72-max-api,craft72-max-worker --update-env` without `pm2 save`;
+7. checks loopback API readiness and the worker PID, then the public API, exact public release marker
+   and the protected webhook boundary. A failure restores the previous pointer and reloads or
+   removes only the two CRAFT72 processes.
+
+The `activate-stage3.sh`, `rollback-stage3.sh`, `cleanup-stage3-retention.sh` and installed Nginx
+snippet names are retained for compatibility with existing immutable releases. Their current
+behavior is Stage 4-aware.
 
 Host, port and root can be overridden without editing the script:
 
@@ -122,9 +204,30 @@ prints an SSH password, sudo password, bot token, OAuth token or database passwo
 curl -fsS https://craft72app.ru/release-id.txt
 curl -fsS https://craft72app.ru/health/live
 curl -fsS https://craft72app.ru/health/ready
+test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  --data '{"update_type":"acceptance_probe","timestamp":1}' \
+  https://craft72app.ru/webhooks/max)" = 401
 ssh -p 2222 mun@109.174.15.132 'pm2 describe craft72-max-api'
+ssh -p 2222 mun@109.174.15.132 'pm2 describe craft72-max-worker'
 ```
 
 Verify the Mini App from MAX as well as in a normal browser. The MAX path must display the approved
 policy before its first server request, authenticate signed init data, persist a server draft,
-verify the shared contact and return only the signed-in user's submission.
+verify the shared contact and return only the signed-in user's submission. Exercise `/start`, each
+open-app route, a regular text inquiry and a duplicate webhook fixture; the duplicate must not
+create a second inquiry or outbound action.
+
+The release deployment intentionally does not change the MAX control plane. Inspect the current
+subscription with the release helper:
+
+```bash
+/home/mun/apps/craft72-max-app/current/scripts/max-webhook-subscription.sh status
+```
+
+Run its `register` action only during the explicitly approved Stage 8 production activation, after
+the HTTPS endpoint and both processes pass acceptance. Keep `unregister` for an approved incident or
+retirement procedure. The helper reads the protected env itself and does not print credentials.
+
+File upload/storage is not enabled until Stage 5. Tracker dry-run, queue mapping and delivery are not
+enabled until Stage 6.

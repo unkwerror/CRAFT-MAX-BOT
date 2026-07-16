@@ -1,5 +1,7 @@
 /home/mun/apps/craft72-max-app/shared/logs/api.log
 /home/mun/apps/craft72-max-app/shared/logs/api-error.log
+/home/mun/apps/craft72-max-app/shared/logs/worker.log
+/home/mun/apps/craft72-max-app/shared/logs/worker-error.log
 /home/mun/apps/craft72-max-app/shared/logs/retention.log {
     su mun mun
     daily
