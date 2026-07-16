@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { LeadDraftFormState, LeadFormData } from '@craft72/contracts/source';
+import type { LeadDraftFormState } from '@craft72/contracts/source';
 
 import {
-  toFinalLeadForm,
   toggleDraftSelection,
   validateBriefStep,
   type BriefErrors,
@@ -24,7 +23,6 @@ import {
   ROLE_OPTIONS,
   SERVICE_OPTIONS,
   TRI_STATE_OPTIONS,
-  labelFor,
 } from '../content.js';
 import { MOCK_CASE_CATALOG } from '../domain/case-catalog.js';
 
@@ -100,11 +98,12 @@ export const BRIEF_STEP_META: Readonly<Record<BriefStep, BriefStepMeta>> = {
   },
   16: {
     title: 'Согласие на обработку данных',
-    subtitle: 'Подтвердите согласие перед проверкой заявки.',
+    subtitle:
+      'Подтвердите согласие на обработку данных этой заявки — это нужно для отправки, а не повторное принятие условий сервиса.',
   },
   17: {
     title: 'Бриф заполнен',
-    subtitle: 'Проверьте основные сведения и перейдите к итоговому резюме.',
+    subtitle: 'Все разделы заполнены. Осталось открыть итоговое резюме и отправить заявку.',
   },
 };
 
@@ -125,23 +124,12 @@ const START_STATUS_OPTIONS = [
 
 const errorProps = (error: string | undefined) => (error === undefined ? {} : { error });
 
-function formatLocation(form: LeadFormData): string {
-  return [form.location.city, form.location.region].filter(Boolean).join(', ');
-}
-
-function formatScope(form: LeadFormData): string {
-  return form.scope.kind === 'portfolio'
-    ? `Портфель · ${String(form.scope.objectCount)} объектов`
-    : 'Один объект';
-}
-
-function finalFormFromDraft(draft: LeadDraftFormState): LeadFormData | null {
-  try {
-    return toFinalLeadForm(draft);
-  } catch {
-    return null;
-  }
-}
+const STEP_17_CHECKLIST = [
+  'Роль и контакты',
+  'Объект и масштаб',
+  'Услуги и сроки',
+  'Материалы и согласие',
+] as const;
 
 interface BriefStepFieldsProps {
   readonly consentVersion: string;
@@ -149,7 +137,6 @@ interface BriefStepFieldsProps {
   readonly errors: BriefErrors;
   readonly materialCount: number;
   readonly onChange: (draft: LeadDraftFormState) => void;
-  readonly onEditStep?: (step: BriefStep) => void;
   readonly onOpenMaterials?: () => void;
   readonly onRequestContact?: () => void | Promise<void>;
   readonly phoneVerified: boolean;
@@ -165,7 +152,6 @@ const BriefStepFields = ({
   errors,
   materialCount,
   onChange,
-  onEditStep,
   onOpenMaterials,
   onRequestContact,
   phoneVerified,
@@ -587,70 +573,30 @@ const BriefStepFields = ({
         </>
       );
 
-    case 17: {
-      const form = finalFormFromDraft(draft);
-
-      if (form === null) {
-        return (
-          <InlineNotice icon="warning" tone="warning">
-            <strong>Нужно проверить заполненные разделы</strong>
+    case 17:
+      return (
+        <>
+          <InlineNotice icon="check" tone="success">
+            <strong>Все разделы заполнены</strong>
             <span>
-              {errors.form ?? 'Вернитесь к полям с пропущенными или некорректными данными.'}
+              Нажмите «К проверке», чтобы открыть итоговое резюме и отправить заявку.
             </span>
           </InlineNotice>
-        );
-      }
-
-      const reviewSections: readonly {
-        readonly editStep: BriefStep;
-        readonly label: string;
-        readonly value: string;
-      }[] = [
-        {
-          editStep: 2,
-          label: 'Заказчик',
-          value: `${form.fullName} · ${form.organization}`,
-        },
-        {
-          editStep: 4,
-          label: 'Объект',
-          value: `${labelFor(OBJECT_TYPE_OPTIONS, form.objectType)} · ${formatLocation(form)}`,
-        },
-        { editStep: 6, label: 'Масштаб', value: formatScope(form) },
-        {
-          editStep: 9,
-          label: 'Услуги',
-          value: form.services.map((service) => labelFor(SERVICE_OPTIONS, service)).join(', '),
-        },
-        {
-          editStep: 13,
-          label: 'Материалы',
-          value: `${String(materialCount)} файлов · ${String(form.links.length)} ссылок`,
-        },
-        { editStep: 14, label: 'Контакт', value: `${form.contact.phone} · ${form.contact.email}` },
-      ];
-
-      return (
-        <div className="summary-sections">
-          {reviewSections.map((section) => (
-            <section className="summary-card" key={section.label}>
-              <div className="summary-card__head">
-                <h2>{section.label}</h2>
-                {onEditStep === undefined ? null : (
-                  <button onClick={() => onEditStep(section.editStep)} type="button">
-                    Изменить
-                  </button>
-                )}
-              </div>
-              <dl>
-                <dt>Указано</dt>
-                <dd>{section.value}</dd>
-              </dl>
-            </section>
-          ))}
-        </div>
+          <div className="chip-list" aria-label="Заполненные разделы">
+            {STEP_17_CHECKLIST.map((item) => (
+              <span className="chip is-selected" key={item}>
+                <Icon name="check" size={17} /> {item}
+              </span>
+            ))}
+          </div>
+          {errors.form === undefined ? null : (
+            <InlineNotice icon="warning" tone="warning">
+              <strong>Нужно проверить заполненные разделы</strong>
+              <span>{errors.form}</span>
+            </InlineNotice>
+          )}
+        </>
       );
-    }
   }
 };
 
@@ -669,8 +615,20 @@ export interface BriefScreenProps {
   readonly phoneVerified?: boolean;
   readonly privacyPolicyUrl?: string;
   readonly requestingContact?: boolean;
+  readonly saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
+  readonly saveStatusText?: string;
   readonly serverBacked?: boolean;
   readonly step: BriefStep;
+}
+
+function saveStatusLabel(
+  saveStatus: 'idle' | 'saving' | 'saved' | 'error' | undefined,
+  saveStatusText: string | undefined,
+): string | null {
+  if (saveStatus === 'saving') return 'Сохраняем…';
+  if (saveStatus === 'saved') return saveStatusText ?? 'Сохранено';
+  if (saveStatus === 'error') return 'Не удалось сохранить · данные останутся в форме';
+  return null;
 }
 
 export const BriefScreen = ({
@@ -681,19 +639,21 @@ export const BriefScreen = ({
   onBack,
   onContinue,
   onDraftChange,
-  onEditStep,
   onOpenMaterials,
   onRequestContact,
   onSaveAndExit,
   phoneVerified = false,
   privacyPolicyUrl,
   requestingContact = false,
+  saveStatus,
+  saveStatusText,
   serverBacked = false,
   step,
 }: BriefScreenProps) => {
   const [errors, setErrors] = useState<BriefErrors>({});
   const stepHeadingRef = useRef<HTMLHeadingElement>(null);
   const meta = BRIEF_STEP_META[step];
+  const statusLine = saveStatusLabel(saveStatus, saveStatusText);
 
   useEffect(() => {
     setErrors({});
@@ -714,7 +674,17 @@ export const BriefScreen = ({
   const handleContinue = (): void => {
     const nextErrors = validateBriefStep(step, draft);
     setErrors(nextErrors);
-    if (Object.keys(nextErrors).length === 0) void onContinue(draft);
+    if (Object.keys(nextErrors).length === 0) {
+      void onContinue(draft);
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      const first = document.querySelector(
+        '.field--error input, .field--error textarea, .choice-field.field--error button, .field__error',
+      );
+      if (first instanceof HTMLElement) first.focus();
+    });
   };
 
   return (
@@ -725,6 +695,14 @@ export const BriefScreen = ({
         subtitle="Структурированный бриф проекта"
         title="Новый проект"
       />
+      {statusLine === null ? null : (
+        <p
+          aria-live="polite"
+          className={`brief-save-status${saveStatus === 'error' ? ' brief-save-status--error' : ''}`}
+        >
+          {statusLine}
+        </p>
+      )}
       <div className="brief-step" key={step}>
         <ProgressBar current={step} label={meta.title} total={BRIEF_TOTAL_STEPS} />
 
@@ -740,7 +718,6 @@ export const BriefScreen = ({
               errors={errors}
               materialCount={materialCount}
               onChange={handleDraftChange}
-              {...(onEditStep === undefined ? {} : { onEditStep })}
               {...(onOpenMaterials === undefined ? {} : { onOpenMaterials })}
               {...(onRequestContact === undefined ? {} : { onRequestContact })}
               phoneVerified={phoneVerified}
@@ -755,7 +732,7 @@ export const BriefScreen = ({
 
       <StickyActions
         continueDisabled={isSaving}
-        continueLabel={step === 17 ? 'Перейти к проверке' : 'Продолжить'}
+        continueLabel={step === 17 ? 'К проверке' : 'Продолжить'}
         loading={isSaving}
         onBack={onBack}
         onContinue={handleContinue}

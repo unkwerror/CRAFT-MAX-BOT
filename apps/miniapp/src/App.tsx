@@ -11,7 +11,15 @@ import type {
 import { Stage3ApiClient, Stage3ApiClientError } from './api/index.js';
 import { createEmptyDraft, toFinalLeadForm } from './brief/draft.js';
 import { InlineNotice } from './components/FormControls.js';
-import { AppTopbar, BottomNav, LoadingScreen, Page, Toast } from './components/Layout.js';
+import {
+  AppTopbar,
+  BottomNav,
+  LoadingScreen,
+  Page,
+  Toast,
+  type StatusTone,
+  type ToastTone,
+} from './components/Layout.js';
 import type { ServiceRecommendation } from './domain/index.js';
 import {
   createBrowserDraftStorage,
@@ -38,6 +46,9 @@ import { PrivacyScreen } from './screens/PrivacyScreen.js';
 import { SuccessScreen } from './screens/SuccessScreen.js';
 import { SummaryScreen } from './screens/SummaryScreen.js';
 import { UploadScreen } from './screens/UploadScreen.js';
+
+type ToastState = { message: string; tone: ToastTone } | null;
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 const asBriefStep = (value: number): BriefStep =>
   Math.max(1, Math.min(BRIEF_TOTAL_STEPS, Math.trunc(value))) as BriefStep;
@@ -76,6 +87,13 @@ const activeNavigationRoute = (route: AppRoute): AppRoute => {
 
 type RuntimeStatus = 'awaiting-consent' | 'connected' | 'connecting' | 'error' | 'preview';
 
+const runtimeStatusTone = (status: RuntimeStatus): StatusTone => {
+  if (status === 'connected') return 'ok';
+  if (status === 'connecting' || status === 'awaiting-consent') return 'warn';
+  if (status === 'error') return 'error';
+  return 'neutral';
+};
+
 const normalizeServerDraft = (draft: LeadDraftFormState): LeadDraftFormState => ({
   ...draft,
   consent: {
@@ -86,7 +104,13 @@ const normalizeServerDraft = (draft: LeadDraftFormState): LeadDraftFormState => 
   },
 });
 
-const RuntimeUnavailableScreen = () => (
+const RuntimeUnavailableScreen = ({
+  onRetry,
+  onSupport,
+}: {
+  readonly onRetry: () => void;
+  readonly onSupport?: () => void;
+}) => (
   <Page className="page--narrow" withNavigation={false}>
     <section className="content-card privacy-copy">
       <h1>Сервис временно недоступен</h1>
@@ -97,9 +121,14 @@ const RuntimeUnavailableScreen = () => (
           позже.
         </span>
       </InlineNotice>
-      <button className="save-exit" onClick={() => window.location.reload()} type="button">
+      <button className="save-exit" onClick={onRetry} type="button">
         Повторить подключение
       </button>
+      {onSupport === undefined ? null : (
+        <button className="save-exit" onClick={onSupport} type="button">
+          Связаться с менеджером
+        </button>
+      )}
     </section>
   </Page>
 );
@@ -152,8 +181,14 @@ export const App = () => {
   const [privacyAcknowledged, setPrivacyAcknowledged] = useState(!shouldUseServer);
   const [submission, setSubmission] = useState<Submission | null>(null);
   const [submitError, setSubmitError] = useState<string | undefined>();
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [saveStatusText, setSaveStatusText] = useState<string | undefined>();
   const [theme, setTheme] = useState(() => maxBridge.getTheme());
+
+  const showToast = useCallback((message: string, tone: ToastTone): void => {
+    setToast({ message, tone });
+  }, []);
 
   const navigate = useCallback((nextRoute: AppRoute): void => {
     const href = routeHref(nextRoute);
@@ -257,7 +292,7 @@ export const App = () => {
         if (!active || controller.signal.aborted) return;
         serverApi.clearSession();
         setRuntimeStatus('error');
-        setToast('Не удалось установить защищённую MAX-сессию');
+        showToast('Не удалось установить защищённую MAX-сессию', 'error');
       }
     })();
 
@@ -266,7 +301,7 @@ export const App = () => {
       controller.abort();
       serverApi.clearSession();
     };
-  }, [initData, navigate, privacyAcknowledged, serverApi, shouldUseServer]);
+  }, [initData, navigate, privacyAcknowledged, serverApi, shouldUseServer, showToast]);
 
   useEffect(() => {
     const syncRoute = (): void => setRoute(getRouteFromHash(window.location.hash));
@@ -281,13 +316,14 @@ export const App = () => {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    themeColor?.setAttribute('content', theme === 'dark' ? '#0c0d0f' : '#f5f5f4');
+    // v2 tokens: light #f2f2ef, dark #111315
+    themeColor?.setAttribute('content', theme === 'dark' ? '#111315' : '#f2f2ef');
     return maxBridge.subscribeTheme(setTheme);
   }, [theme]);
 
   useEffect(() => {
     let active = true;
-    void maxBridge.getViewportSize().then((viewport) => {
+    const apply = (viewport: { width: number; height: number }): void => {
       if (!active) return;
       document.documentElement.style.setProperty(
         '--app-viewport-height',
@@ -297,9 +333,14 @@ export const App = () => {
         '--app-viewport-width',
         viewport.width > 0 ? `${String(viewport.width)}px` : '100vw',
       );
-    });
+    };
+
+    void maxBridge.getViewportSize().then(apply);
+    const unsubViewport = maxBridge.subscribeViewport(apply);
+
     return () => {
       active = false;
+      unsubViewport();
     };
   }, []);
 
@@ -312,17 +353,33 @@ export const App = () => {
   useEffect(() => {
     if (!hasActiveDraft) return undefined;
     if (shouldUseServer && !privacyAcknowledged) return undefined;
+    setSaveStatus((current) => (current === 'saved' ? current : 'saving'));
     const timeout = window.setTimeout(() => {
-      void persistDraft(draft, briefStep).catch(() => {
-        setToast(
-          shouldUseServer
-            ? 'Не удалось сохранить черновик на сервере'
-            : 'Не удалось сохранить черновик на этом устройстве',
-        );
-      });
+      void persistDraft(draft, briefStep)
+        .then((stored) => {
+          setSaveStatus('saved');
+          setSaveStatusText(formatDraftTimestamp(stored.updatedAt));
+        })
+        .catch(() => {
+          setSaveStatus('error');
+          showToast(
+            shouldUseServer
+              ? 'Не удалось сохранить черновик на сервере'
+              : 'Не удалось сохранить черновик на этом устройстве',
+            'error',
+          );
+        });
     }, 180);
     return () => window.clearTimeout(timeout);
-  }, [briefStep, draft, hasActiveDraft, persistDraft, privacyAcknowledged, shouldUseServer]);
+  }, [
+    briefStep,
+    draft,
+    hasActiveDraft,
+    persistDraft,
+    privacyAcknowledged,
+    shouldUseServer,
+    showToast,
+  ]);
 
   useEffect(() => {
     if (toast === null) return undefined;
@@ -364,7 +421,7 @@ export const App = () => {
 
   const openBrief = useCallback((): void => {
     if (shouldUseServer && runtimeStatus !== 'connected') {
-      setToast('Дождитесь подключения защищённой MAX-сессии');
+      showToast('Дождитесь подключения защищённой MAX-сессии', 'warning');
       return;
     }
     if (shouldUseServer && !privacyAcknowledged) {
@@ -373,7 +430,7 @@ export const App = () => {
     }
     setHasActiveDraft(true);
     navigate('brief');
-  }, [navigate, privacyAcknowledged, runtimeStatus, shouldUseServer]);
+  }, [navigate, privacyAcknowledged, runtimeStatus, shouldUseServer, showToast]);
 
   const handleNavigation = useCallback(
     (nextRoute: AppRoute): void => {
@@ -386,52 +443,64 @@ export const App = () => {
   const handleBriefContinue = useCallback(
     async (nextDraft: LeadDraftFormState): Promise<void> => {
       setIsSaving(true);
+      setSaveStatus('saving');
       await Promise.resolve();
       try {
         const cleaned = cleanDraftForValidation(nextDraft);
         setDraft(cleaned);
         setHasActiveDraft(true);
         if (returnToSummaryAfterEdit && safeFinalForm(cleaned) !== null) {
-          await persistDraft(cleaned, 17);
+          const stored = await persistDraft(cleaned, 17);
+          setSaveStatus('saved');
+          setSaveStatusText(formatDraftTimestamp(stored.updatedAt));
           setReturnToSummaryAfterEdit(false);
           navigate('summary');
         } else if (briefStep < BRIEF_TOTAL_STEPS) {
           const nextStep = asBriefStep(briefStep + 1);
-          await persistDraft(cleaned, nextStep);
+          const stored = await persistDraft(cleaned, nextStep);
+          setSaveStatus('saved');
+          setSaveStatusText(formatDraftTimestamp(stored.updatedAt));
           setBriefStep(nextStep);
         } else {
-          await persistDraft(cleaned, 17);
+          const stored = await persistDraft(cleaned, 17);
+          setSaveStatus('saved');
+          setSaveStatusText(formatDraftTimestamp(stored.updatedAt));
           setReturnToSummaryAfterEdit(false);
           navigate('summary');
         }
       } catch {
-        setToast('Не удалось сохранить черновик. Проверьте подключение и повторите.');
+        setSaveStatus('error');
+        showToast('Не удалось сохранить черновик. Проверьте подключение и повторите.', 'error');
       } finally {
         setIsSaving(false);
       }
     },
-    [briefStep, navigate, persistDraft, returnToSummaryAfterEdit],
+    [briefStep, navigate, persistDraft, returnToSummaryAfterEdit, showToast],
   );
 
   const handleSaveAndExit = useCallback(
     async (nextDraft: LeadDraftFormState): Promise<void> => {
       setIsSaving(true);
+      setSaveStatus('saving');
       await Promise.resolve();
       try {
         const cleaned = cleanDraftForValidation(nextDraft);
         setDraft(cleaned);
         setHasActiveDraft(true);
-        await persistDraft(cleaned, briefStep);
+        const stored = await persistDraft(cleaned, briefStep);
+        setSaveStatus('saved');
+        setSaveStatusText(formatDraftTimestamp(stored.updatedAt));
         setReturnToSummaryAfterEdit(false);
-        setToast('Черновик сохранён');
+        showToast('Черновик сохранён', 'success');
         navigate('home');
       } catch {
-        setToast('Не удалось сохранить черновик. Проверьте подключение и повторите.');
+        setSaveStatus('error');
+        showToast('Не удалось сохранить черновик. Проверьте подключение и повторите.', 'error');
       } finally {
         setIsSaving(false);
       }
     },
-    [briefStep, navigate, persistDraft],
+    [briefStep, navigate, persistDraft, showToast],
   );
 
   const handleEditStep = useCallback(
@@ -465,17 +534,18 @@ export const App = () => {
         contact: { ...current.contact, phone },
       }));
       setHasActiveDraft(true);
-      setToast('Контакт получен из MAX');
+      showToast('Контакт получен из MAX', 'success');
     } catch {
-      setToast(
+      showToast(
         shouldUseServer
           ? 'Не удалось проверить контакт через MAX — введите номер вручную'
           : 'MAX не передал контакт — введите номер вручную',
+        'warning',
       );
     } finally {
       setRequestingContact(false);
     }
-  }, [runtimeStatus, serverApi, session, shouldUseServer]);
+  }, [runtimeStatus, serverApi, session, shouldUseServer, showToast]);
 
   const handleFinderDiscuss = useCallback(
     (recommendations: readonly ServiceRecommendation[]): void => {
@@ -483,10 +553,10 @@ export const App = () => {
         ...new Set([...(draft.services ?? []), ...recommendations.map((item) => item.service)]),
       ];
       updateDraft({ ...draft, services });
-      setToast('Направления добавлены в бриф');
-      openBrief();
+      // Soft-add: toast only — user navigates to brief via bottom nav when ready
+      showToast('Направления добавлены в бриф', 'success');
     },
-    [draft, openBrief, updateDraft],
+    [draft, showToast, updateDraft],
   );
 
   const handleCaseDiscuss = useCallback(
@@ -496,31 +566,31 @@ export const App = () => {
           ...draft,
           selectedCaseIds: draft.selectedCaseIds.filter((caseId) => caseId !== item.id),
         });
-        setToast('Проект убран из брифа');
+        showToast('Проект убран из брифа', 'success');
         return;
       }
       const selectedCaseIds = [...new Set([...(draft.selectedCaseIds ?? []), item.id])];
       updateDraft({ ...draft, selectedCaseIds });
-      setToast('Проект добавлен в бриф');
-      openBrief();
+      // Soft-add: toast only — do not openBrief()
+      showToast('Проект добавлен в бриф', 'success');
     },
-    [draft, openBrief, updateDraft],
+    [draft, showToast, updateDraft],
   );
 
   const handleOpenManagerChat = useCallback((): void => {
     if (maxBotConfiguration.url === null) {
-      setToast('Чат с менеджером временно недоступен');
+      showToast('Чат с менеджером временно недоступен', 'error');
       return;
     }
 
     try {
       if (!maxBridge.openMaxLink(maxBotConfiguration.url)) {
-        setToast('Не удалось открыть чат с менеджером');
+        showToast('Не удалось открыть чат с менеджером', 'error');
       }
     } catch {
-      setToast('Не удалось открыть чат с менеджером');
+      showToast('Не удалось открыть чат с менеджером', 'error');
     }
-  }, []);
+  }, [showToast]);
 
   const handleDocumentAdded = useCallback((documentId: string): void => {
     setDraft((current) => ({
@@ -543,13 +613,23 @@ export const App = () => {
       try {
         const response = await serverApi.createDownloadLink(documentId);
         if (!maxBridge.openLink(response.downloadUrl)) {
-          setToast('Не удалось открыть ссылку на файл');
+          showToast('Не удалось открыть ссылку на файл', 'error');
         }
       } catch {
-        setToast('Не удалось подготовить ссылку на файл');
+        showToast('Не удалось подготовить ссылку на файл', 'error');
       }
     },
-    [serverApi],
+    [serverApi, showToast],
+  );
+
+  const handleUploadToast = useCallback(
+    (message: string): void => {
+      let tone: ToastTone = 'error';
+      if (/загружен/i.test(message)) tone = 'success';
+      else if (/будет доступна/i.test(message)) tone = 'warning';
+      showToast(message, tone);
+    },
+    [showToast],
   );
 
   const finalForm = useMemo(() => safeFinalForm(draft), [draft]);
@@ -666,6 +746,8 @@ export const App = () => {
             ? { privacyPolicyUrl: privacyConfiguration.policyUrl }
             : {})}
           requestingContact={requestingContact}
+          saveStatus={saveStatus}
+          {...(saveStatusText === undefined ? {} : { saveStatusText })}
           serverBacked={runtimeStatus === 'connected'}
           step={briefStep}
         />
@@ -703,7 +785,7 @@ export const App = () => {
                   : [link, ...(draft.links ?? []).slice(1)],
             })
           }
-          onToast={setToast}
+          onToast={handleUploadToast}
           serverBacked={shouldUseServer}
           uploadApi={shouldUseServer ? serverApi : uploadApi}
           uploadLink={draft.links?.[0] ?? ''}
@@ -735,10 +817,11 @@ export const App = () => {
         ) : (
           <SuccessScreen
             onAddMaterials={() => {
-              setToast(
+              showToast(
                 shouldUseServer
                   ? 'Открыт новый черновик — отправленная заявка не изменится'
                   : 'Открыт новый черновик — предыдущая preview-заявка не изменится',
+                'success',
               );
               navigate('upload');
             }}
@@ -784,7 +867,14 @@ export const App = () => {
   } else if (runtimeStatus === 'connecting') {
     screen = <LoadingScreen label="Проверяем защищённую MAX-сессию…" />;
   } else if (runtimeStatus === 'error') {
-    screen = <RuntimeUnavailableScreen />;
+    screen = (
+      <RuntimeUnavailableScreen
+        onRetry={() => {
+          window.location.reload();
+        }}
+        onSupport={handleOpenManagerChat}
+      />
+    );
   } else if (
     runtimeStatus === 'connected' &&
     !privacyAcknowledged &&
@@ -835,15 +925,23 @@ export const App = () => {
   return (
     <MaxUI colorScheme={theme} platform={platform}>
       <div className="app" data-platform={maxBridge.getPlatform()}>
-        <AppTopbar onNavigate={handleNavigation} status={runtimeLabel} />
-        <div className="mock-ribbon">{runtimeNotice}</div>
-        {showNavigation ? (
-          <BottomNav activeRoute={activeNavigationRoute(route)} onNavigate={handleNavigation} />
-        ) : null}
+        <AppTopbar
+          onNavigate={handleNavigation}
+          status={runtimeLabel}
+          statusTone={runtimeStatusTone(runtimeStatus)}
+        />
+        {runtimeStatus === 'connected' ? null : (
+          <div className="mock-ribbon">{runtimeNotice}</div>
+        )}
         <div className="screen-shell" key={`${runtimeStatus}:${route}`}>
           {screen}
         </div>
-        {toast === null ? null : <Toast message={toast} onClose={() => setToast(null)} />}
+        {showNavigation ? (
+          <BottomNav activeRoute={activeNavigationRoute(route)} onNavigate={handleNavigation} />
+        ) : null}
+        {toast === null ? null : (
+          <Toast message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />
+        )}
       </div>
     </MaxUI>
   );

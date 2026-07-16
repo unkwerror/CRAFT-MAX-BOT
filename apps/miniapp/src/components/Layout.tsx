@@ -12,21 +12,36 @@ const NAV_ITEMS: readonly { icon: IconName; label: string; route: AppRoute }[] =
   { icon: 'upload', label: 'Материалы', route: 'upload' },
 ];
 
+export type StatusTone = 'ok' | 'warn' | 'error' | 'neutral';
+
 export interface AppTopbarProps {
   readonly onNavigate: (route: AppRoute) => void;
   readonly status?: string;
+  readonly statusTone?: StatusTone;
 }
 
-export const AppTopbar = ({ onNavigate, status = 'Проектное бюро' }: AppTopbarProps) => (
+export const AppTopbar = ({
+  onNavigate,
+  status = 'Проектное бюро',
+  statusTone,
+}: AppTopbarProps) => (
   <header className="app-topbar">
-    <button className="brand" onClick={() => onNavigate('home')} type="button">
+    <button
+      aria-label="КРАФТ — на главную"
+      className="brand"
+      onClick={() => onNavigate('home')}
+      type="button"
+    >
       <span className="brand__wordmark" aria-label="КРАФТ">
         КРАФТ<span aria-hidden="true">.</span>
       </span>
       <span className="brand__product">MAX MINI APP</span>
     </button>
     <span className="app-topbar__secure" title={status}>
-      <span aria-hidden="true" className="app-topbar__status-dot" />
+      <span
+        aria-hidden="true"
+        className={`app-topbar__status-dot app-topbar__status-dot--${statusTone ?? 'neutral'}`}
+      />
       <span className="app-topbar__status-copy">{status}</span>
     </span>
   </header>
@@ -101,11 +116,20 @@ export interface ProgressBarProps {
 
 export const ProgressBar = ({ current, label, total }: ProgressBarProps) => {
   const progress = Math.max(0, Math.min(100, (current / total) * 100));
+  const stepText = `Шаг ${String(current)} из ${String(total)}`;
 
   return (
-    <div className="progress" aria-label={`Шаг ${String(current)} из ${String(total)}`}>
+    <div
+      className="progress"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(progress)}
+      aria-valuetext={stepText}
+      aria-label={label ?? stepText}
+    >
       <div className="progress__meta">
-        <span>{label ?? `Шаг ${String(current)} из ${String(total)}`}</span>
+        <span>{label ?? stepText}</span>
         <strong>{Math.round(progress)}%</strong>
       </div>
       <div aria-hidden="true" className="progress__track">
@@ -164,14 +188,23 @@ export const LoadingScreen = ({ label = 'Загружаем данные…' }: 
   </div>
 );
 
+export type ToastTone = 'success' | 'error' | 'warning';
+
 export interface ToastProps {
   readonly message: string;
   readonly onClose: () => void;
+  readonly tone?: ToastTone;
 }
 
-export const Toast = ({ message, onClose }: ToastProps) => (
-  <div className="toast" role="status">
-    <Icon name="check" size={18} />
+const TOAST_ICON: Readonly<Record<ToastTone, IconName>> = {
+  success: 'check',
+  error: 'warning',
+  warning: 'warning',
+};
+
+export const Toast = ({ message, onClose, tone = 'success' }: ToastProps) => (
+  <div className={`toast toast--${tone}`} role={tone === 'success' ? 'status' : 'alert'}>
+    <Icon name={TOAST_ICON[tone]} size={18} />
     <span>{message}</span>
     <button aria-label="Закрыть уведомление" onClick={onClose} type="button">
       <Icon name="close" size={17} />

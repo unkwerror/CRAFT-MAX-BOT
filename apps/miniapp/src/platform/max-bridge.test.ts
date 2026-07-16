@@ -232,12 +232,142 @@ describe('MAX Bridge adapter', () => {
 
     expect(bridge.getTheme()).toBe('dark');
     const unsubscribe = bridge.subscribeTheme(callback);
+    (mediaQuery as { matches: boolean }).matches = false;
     themeListener?.({ matches: false });
     unsubscribe();
     unsubscribe();
 
     expect(callback).toHaveBeenCalledWith('light');
     expect(mediaQuery.removeEventListener).toHaveBeenCalledOnce();
+  });
+
+  it('prefers WebApp.colorScheme over prefers-color-scheme media query', () => {
+    const mediaQuery: MediaQueryListLike = {
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    const bridge = createMaxBridge({
+      WebApp: createWebApp({ colorScheme: 'dark' }),
+      matchMedia: vi.fn(() => mediaQuery),
+    });
+
+    expect(bridge.getTheme()).toBe('dark');
+
+    const lightBridge = createMaxBridge({
+      WebApp: createWebApp({ colorScheme: 'light' }),
+      matchMedia: vi.fn(() => ({ matches: true })),
+    });
+    expect(lightBridge.getTheme()).toBe('light');
+
+    const unknownSchemeBridge = createMaxBridge({
+      WebApp: createWebApp({ colorScheme: 'auto' }),
+      matchMedia: vi.fn(() => ({ matches: true })),
+    });
+    expect(unknownSchemeBridge.getTheme()).toBe('dark');
+  });
+
+  it('subscribes to themeChanged from WebApp and media query together', () => {
+    let themeListener: MediaQueryChangeListener | undefined;
+    let bridgeListener: ((...args: unknown[]) => void) | undefined;
+    const mediaQuery: MediaQueryListLike = {
+      matches: false,
+      addEventListener: vi.fn((_type, listener) => {
+        themeListener = listener;
+      }),
+      removeEventListener: vi.fn(),
+    };
+    const onEvent = vi.fn((eventType: string, callback: (...args: unknown[]) => void) => {
+      if (eventType === 'themeChanged') {
+        bridgeListener = callback;
+      }
+    });
+    const offEvent = vi.fn();
+    const webApp = createWebApp({
+      colorScheme: 'light',
+      onEvent,
+      offEvent,
+    });
+    const bridge = createMaxBridge({
+      WebApp: webApp,
+      matchMedia: vi.fn(() => mediaQuery),
+    });
+    const callback = vi.fn();
+
+    const unsubscribe = bridge.subscribeTheme(callback);
+
+    (webApp as { colorScheme?: string }).colorScheme = 'dark';
+    bridgeListener?.();
+    expect(callback).toHaveBeenLastCalledWith('dark');
+
+    delete (webApp as { colorScheme?: string }).colorScheme;
+    (mediaQuery as { matches: boolean }).matches = true;
+    themeListener?.({ matches: true });
+    expect(callback).toHaveBeenLastCalledWith('dark');
+
+    unsubscribe();
+    unsubscribe();
+
+    expect(onEvent).toHaveBeenCalledWith('themeChanged', expect.any(Function));
+    expect(offEvent).toHaveBeenCalledOnce();
+    expect(mediaQuery.removeEventListener).toHaveBeenCalledOnce();
+  });
+
+  it('subscribeTheme receives updates from media when bridge theme API is absent', () => {
+    let themeListener: MediaQueryChangeListener | undefined;
+    const mediaQuery: MediaQueryListLike = {
+      matches: false,
+      addEventListener: vi.fn((_type, listener) => {
+        themeListener = listener;
+      }),
+      removeEventListener: vi.fn(),
+    };
+    const bridge = createMaxBridge({
+      WebApp: createWebApp(),
+      matchMedia: vi.fn(() => mediaQuery),
+    });
+    const callback = vi.fn();
+
+    expect(bridge.getTheme()).toBe('light');
+    const unsubscribe = bridge.subscribeTheme(callback);
+    (mediaQuery as { matches: boolean }).matches = true;
+    themeListener?.({ matches: true });
+    unsubscribe();
+
+    expect(callback).toHaveBeenCalledWith('dark');
+  });
+
+  it('fires subscribeViewport on window resize', () => {
+    const listeners = new Map<string, BrowserEventListener>();
+    const addEventListener = vi.fn((type: string, listener: BrowserEventListener) => {
+      listeners.set(type, listener);
+    });
+    const removeEventListener = vi.fn((type: string, listener: BrowserEventListener) => {
+      if (listeners.get(type) === listener) {
+        listeners.delete(type);
+      }
+    });
+    const host: MaxBridgeWindow = {
+      innerWidth: 390,
+      innerHeight: 844,
+      addEventListener,
+      removeEventListener,
+    };
+    const bridge = createMaxBridge(host);
+    const callback = vi.fn();
+
+    const unsubscribe = bridge.subscribeViewport(callback);
+    (host as { innerWidth: number; innerHeight: number }).innerWidth = 820;
+    (host as { innerHeight: number }).innerHeight = 600;
+    listeners.get('resize')?.({});
+    unsubscribe();
+    unsubscribe();
+
+    expect(callback).toHaveBeenCalledWith({ width: 820, height: 600 });
+    expect(addEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(addEventListener).toHaveBeenCalledWith('orientationchange', expect.any(Function));
+    expect(removeEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(removeEventListener).toHaveBeenCalledWith('orientationchange', expect.any(Function));
   });
 
   it('returns verified contact proof and rejects malformed Bridge data', async () => {

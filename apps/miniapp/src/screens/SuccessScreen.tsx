@@ -39,8 +39,7 @@ export const SuccessScreen = ({
       </span>
       <h1>Заявка принята</h1>
       <p>
-        Демонстрационный API принял сведения и материалы в текущей сессии. Идентификатор ниже
-        позволяет проверить идемпотентный mock-сценарий.
+        Менеджер свяжется с вами. Сохраните номер заявки — по нему можно уточнить статус.
       </p>
       <div className="submission-id">
         <span>Идентификатор заявки</span>
@@ -97,14 +96,19 @@ export const SuccessScreen = ({
     </div>
 
     <div className="success-actions">
-      <Button mode="secondary" onClick={onAddMaterials} size="large" type="button">
-        Новый бриф с материалами
-      </Button>
-      <Button mode="secondary" onClick={onOpenChat} size="large" type="button">
+      <Button
+        className="success-actions__primary"
+        onClick={onOpenChat}
+        size="large"
+        type="button"
+      >
         Открыть чат
       </Button>
-      <Button onClick={onHome} size="large" type="button">
+      <Button mode="secondary" onClick={onHome} size="large" type="button">
         На главную
+      </Button>
+      <Button mode="secondary" onClick={onAddMaterials} size="large" type="button">
+        Новый запрос
       </Button>
     </div>
   </Page>

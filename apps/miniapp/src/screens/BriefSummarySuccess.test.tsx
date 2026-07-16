@@ -94,6 +94,18 @@ describe('BriefScreen', () => {
     }
   });
 
+  it('renders step 17 as a lightweight confirmation without mini-summary cards', () => {
+    render(briefScreen(17));
+
+    expect(screen.getByText('Все разделы заполнены')).toBeTruthy();
+    expect(
+      screen.getByText(/Нажмите «К проверке», чтобы открыть итоговое резюме и отправить заявку/),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'К проверке' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Заказчик' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Объект' })).toBeNull();
+  });
+
   it('validates the current step and emits a lossless draft update', () => {
     const onContinue = vi.fn();
     const onDraftChange = vi.fn();
@@ -158,16 +170,36 @@ describe('SuccessScreen', () => {
       />,
     );
 
+    expect(screen.getByRole('heading', { name: 'Заявка принята' })).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Менеджер свяжется с вами\. Сохраните номер заявки — по нему можно уточнить статус\./,
+      ),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/Демонстрационный API|mock/i);
     expect(screen.getByText('CRAFT-2026-001')).toBeTruthy();
     expect(screen.getByText('brief.pdf')).toBeTruthy();
     expect(screen.getByText('Общественный центр')).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/SLA|₽|стоимост|срок/i);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Новый бриф с материалами' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Открыть чат' }));
-    fireEvent.click(screen.getByRole('button', { name: 'На главную' }));
-    expect(onAddMaterials).toHaveBeenCalledTimes(1);
+    const openChat = screen.getByRole('button', { name: 'Открыть чат' });
+    const home = screen.getByRole('button', { name: 'На главную' });
+    const newRequest = screen.getByRole('button', { name: 'Новый запрос' });
+    const actions = openChat.closest('.success-actions');
+    if (!(actions instanceof HTMLElement)) throw new Error('Expected success actions container');
+    const buttons = within(actions).getAllByRole('button');
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      'Открыть чат',
+      'На главную',
+      'Новый запрос',
+    ]);
+    expect(openChat.className).toMatch(/success-actions__primary/);
+
+    fireEvent.click(openChat);
+    fireEvent.click(home);
+    fireEvent.click(newRequest);
     expect(onOpenChat).toHaveBeenCalledTimes(1);
     expect(onHome).toHaveBeenCalledTimes(1);
+    expect(onAddMaterials).toHaveBeenCalledTimes(1);
   });
 });

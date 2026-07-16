@@ -153,38 +153,148 @@ class MaxBridgeAdapterImpl implements MaxBridgeAdapter {
   }
 
   getTheme(): MaxTheme {
+    const webApp = this.getWebApp();
+    const scheme = webApp?.colorScheme;
+    if (scheme === 'dark' || scheme === 'light') {
+      return scheme;
+    }
+
     return this.getThemeMediaQuery()?.matches === true ? 'dark' : 'light';
   }
 
   subscribeTheme(callback: (theme: MaxTheme) => void): Unsubscribe {
-    const mediaQuery = this.getThemeMediaQuery();
-    if (mediaQuery === undefined) {
-      return noop;
-    }
-
-    const listener = (event: { readonly matches: boolean }): void => {
-      callback(event.matches ? 'dark' : 'light');
+    const cleanups: Array<() => void> = [];
+    const notify = (): void => {
+      callback(this.getTheme());
     };
 
-    try {
-      if (typeof mediaQuery.addEventListener === 'function') {
-        mediaQuery.addEventListener('change', listener);
-        return createIdempotentUnsubscribe(() => {
-          mediaQuery.removeEventListener?.('change', listener);
-        });
-      }
+    const webApp = this.getWebApp();
+    if (typeof webApp?.onEvent === 'function') {
+      const bridgeListener = (..._args: unknown[]): void => {
+        notify();
+      };
 
-      if (typeof mediaQuery.addListener === 'function') {
-        mediaQuery.addListener(listener);
-        return createIdempotentUnsubscribe(() => {
-          mediaQuery.removeListener?.(listener);
+      try {
+        webApp.onEvent('themeChanged', bridgeListener);
+        cleanups.push(() => {
+          try {
+            webApp.offEvent?.('themeChanged', bridgeListener);
+          } catch {
+            // Unsubscription is best-effort for a partially injected bridge.
+          }
         });
+      } catch {
+        // Fall through to media-query subscription when the host rejects onEvent.
       }
-    } catch {
+    }
+
+    const mediaQuery = this.getThemeMediaQuery();
+    if (mediaQuery !== undefined) {
+      const mediaListener = (_event: { readonly matches: boolean }): void => {
+        notify();
+      };
+
+      try {
+        if (typeof mediaQuery.addEventListener === 'function') {
+          mediaQuery.addEventListener('change', mediaListener);
+          cleanups.push(() => {
+            mediaQuery.removeEventListener?.('change', mediaListener);
+          });
+        } else if (typeof mediaQuery.addListener === 'function') {
+          mediaQuery.addListener(mediaListener);
+          cleanups.push(() => {
+            mediaQuery.removeListener?.(mediaListener);
+          });
+        }
+      } catch {
+        // Media query subscription is best-effort.
+      }
+    }
+
+    if (cleanups.length === 0) {
       return noop;
     }
 
-    return noop;
+    return createIdempotentUnsubscribe(() => {
+      for (const cleanup of cleanups) {
+        cleanup();
+      }
+    });
+  }
+
+  subscribeViewport(callback: (viewport: MaxViewportSize) => void): Unsubscribe {
+    const cleanups: Array<() => void> = [];
+    const notify = (): void => {
+      callback(this.getBrowserViewportSize());
+    };
+
+    const webApp = this.getWebApp();
+    if (typeof webApp?.onEvent === 'function') {
+      const bridgeListener = (..._args: unknown[]): void => {
+        void this.getViewportSize().then(callback).catch(() => {
+          notify();
+        });
+      };
+
+      try {
+        webApp.onEvent('viewportChanged', bridgeListener);
+        cleanups.push(() => {
+          try {
+            webApp.offEvent?.('viewportChanged', bridgeListener);
+          } catch {
+            // Unsubscription is best-effort for a partially injected bridge.
+          }
+        });
+      } catch {
+        // Fall through to browser listeners when the host rejects onEvent.
+      }
+    }
+
+    const host = this.host;
+    if (typeof host?.addEventListener === 'function') {
+      const windowListener: BrowserEventListener = () => {
+        notify();
+      };
+
+      try {
+        host.addEventListener('resize', windowListener);
+        host.addEventListener('orientationchange', windowListener);
+        cleanups.push(() => {
+          host.removeEventListener?.('resize', windowListener);
+          host.removeEventListener?.('orientationchange', windowListener);
+        });
+      } catch {
+        // Window resize subscription is best-effort.
+      }
+    }
+
+    const visualViewport = host?.visualViewport;
+    if (visualViewport !== undefined && visualViewport !== null) {
+      const vvListener = (): void => {
+        notify();
+      };
+
+      try {
+        if (typeof visualViewport.addEventListener === 'function') {
+          visualViewport.addEventListener('resize', vvListener);
+          cleanups.push(() => {
+            visualViewport.removeEventListener?.('resize', vvListener);
+          });
+        }
+      } catch {
+        // visualViewport subscription is best-effort.
+      }
+    }
+
+    if (cleanups.length === 0) {
+      return noop;
+    }
+
+    return createIdempotentUnsubscribe(() => {
+      for (const cleanup of cleanups) {
+        cleanup();
+      }
+    });
   }
 
   async getViewportSize(): Promise<MaxViewportSize> {

@@ -58,12 +58,19 @@ export interface MaxWebAppBridge {
   readonly platform: MaxPlatform;
   readonly version: string;
   readonly BackButton: MaxWebAppBackButton;
+  /** Preferred when present: 'light' | 'dark' (other strings ignored). */
+  readonly colorScheme?: MaxTheme | string;
+  /** Optional theme tokens from the host; read-only, may be absent. */
+  readonly themeParams?: Readonly<Record<string, string>>;
   getViewportSize(): Promise<MaxWebAppViewportSize>;
   enableClosingConfirmation(): void;
   disableClosingConfirmation(): void;
   requestContact(): Promise<MaxContactData>;
   openLink(url: string): void;
   openMaxLink(url: string): void;
+  /** Flexible event API (e.g. themeChanged, viewportChanged) when the host supports it. */
+  onEvent?(eventType: string, callback: (...args: unknown[]) => void): void;
+  offEvent?(eventType: string, callback: (...args: unknown[]) => void): void;
 }
 
 export type Unsubscribe = () => void;
@@ -83,6 +90,7 @@ export interface MaxBridgeAdapter {
   getTheme(): MaxTheme;
   subscribeTheme(callback: (theme: MaxTheme) => void): Unsubscribe;
   getViewportSize(): Promise<MaxViewportSize>;
+  subscribeViewport(callback: (viewport: MaxViewportSize) => void): Unsubscribe;
   enableClosingConfirmation(): void;
   disableClosingConfirmation(): void;
   requestContact(): Promise<MaxContactData>;
@@ -115,10 +123,22 @@ export interface BrowserWindowProxyLike {
   opener: unknown;
 }
 
+export type MaxBridgeWindowEventType =
+  | 'popstate'
+  | 'beforeunload'
+  | 'resize'
+  | 'orientationchange';
+
+export interface VisualViewportLike {
+  addEventListener?(type: 'resize', listener: () => void): void;
+  removeEventListener?(type: 'resize', listener: () => void): void;
+}
+
 export interface MaxBridgeWindow {
   readonly WebApp?: MaxWebAppBridge;
   readonly innerWidth?: number;
   readonly innerHeight?: number;
+  readonly visualViewport?: VisualViewportLike | null;
   readonly document?: {
     readonly documentElement?: {
       readonly clientWidth?: number;
@@ -127,6 +147,6 @@ export interface MaxBridgeWindow {
   };
   matchMedia?(query: string): MediaQueryListLike;
   open?(url: string, target: string, features: string): BrowserWindowProxyLike | null;
-  addEventListener?(type: 'popstate' | 'beforeunload', listener: BrowserEventListener): void;
-  removeEventListener?(type: 'popstate' | 'beforeunload', listener: BrowserEventListener): void;
+  addEventListener?(type: MaxBridgeWindowEventType, listener: BrowserEventListener): void;
+  removeEventListener?(type: MaxBridgeWindowEventType, listener: BrowserEventListener): void;
 }
