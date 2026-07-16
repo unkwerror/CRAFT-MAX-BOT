@@ -18,18 +18,21 @@ import {
 } from '@craft72/contracts';
 import {
   documents,
+  integrationOutbox,
   leadDrafts,
   maxUsers,
   sessions,
   submissions,
+  uploadSessions,
   webhookInbox,
   type Database,
   type JsonObject,
 } from '@craft72/database';
-import { and, eq, gt, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
 
 import type { ValidatedMaxInitData, VerifiedMaxContact } from './max-auth.js';
 import type { AcceptedMaxWebhook } from './max-webhook.js';
+import { buildTrackerOutboxRows } from './tracker-outbox.js';
 
 export interface AuthenticatedSession {
   readonly consentedAt: Date;
@@ -223,7 +226,6 @@ export class PostgresStage3Store implements Stage3Store {
   readonly #draftTtlSeconds: number;
   readonly #now: () => Date;
   readonly #sessionTtlSeconds: number;
-  readonly #submissionRetentionDays: number;
 
   public constructor(database: Database, options: PostgresStage3StoreOptions) {
     if (!Number.isSafeInteger(options.sessionTtlSeconds) || options.sessionTtlSeconds <= 0) {
@@ -242,7 +244,6 @@ export class PostgresStage3Store implements Stage3Store {
     this.#database = database;
     this.#sessionTtlSeconds = options.sessionTtlSeconds;
     this.#draftTtlSeconds = options.draftTtlSeconds;
-    this.#submissionRetentionDays = options.submissionRetentionDays;
     this.#now = options.now ?? (() => new Date());
   }
 
@@ -273,14 +274,9 @@ export class PostgresStage3Store implements Stage3Store {
 
   public async cleanupExpired(): Promise<void> {
     const now = validNow(this.#now);
-    const submissionCutoff = new Date(
-      now.getTime() - this.#submissionRetentionDays * 24 * 60 * 60 * 1_000,
-    );
-
     await this.#database.transaction(async (transaction) => {
       await transaction.delete(sessions).where(lte(sessions.expiresAt, now));
       await transaction.delete(leadDrafts).where(lte(leadDrafts.expiresAt, now));
-      await transaction.delete(submissions).where(lte(submissions.createdAt, submissionCutoff));
       await transaction.execute(sql`
         delete from ${maxUsers} as candidate
         where not exists (
@@ -298,6 +294,10 @@ export class PostgresStage3Store implements Stage3Store {
           and not exists (
             select 1 from ${documents}
             where ${documents.maxUserId} = candidate.max_user_id
+          )
+          and not exists (
+            select 1 from ${uploadSessions}
+            where ${uploadSessions.maxUserId} = candidate.max_user_id
           )
       `);
     });
@@ -499,8 +499,6 @@ export class PostgresStage3Store implements Stage3Store {
     session: AuthenticatedSession,
     request: SubmissionCreateRequest,
   ): Promise<Submission> {
-    if (request.payload.documentIds.length > 0) throw new StoreNotFoundError('upload');
-
     const now = validNow(this.#now);
     const maxUserId = BigInt(session.maxUserId);
     const fingerprint = requestHash(request);
@@ -541,6 +539,25 @@ export class PostgresStage3Store implements Stage3Store {
         }
 
         const payload = request.payload;
+        if (payload.documentIds.length > 0) {
+          const materialRows = await transaction
+            .select({ id: documents.id })
+            .from(documents)
+            .where(
+              and(
+                inArray(documents.id, payload.documentIds),
+                eq(documents.maxUserId, maxUserId),
+                isNull(documents.submissionId),
+                eq(documents.scanStatus, 'clean'),
+                isNull(documents.deletedAt),
+                gt(documents.stagedExpiresAt, now),
+              ),
+            )
+            .for('update');
+          if (materialRows.length !== new Set(payload.documentIds).size) {
+            throw new StoreNotFoundError('upload');
+          }
+        }
         const createdRows = await transaction
           .insert(submissions)
           .values({
@@ -585,6 +602,35 @@ export class PostgresStage3Store implements Stage3Store {
         const created = createdRows[0];
         if (created === undefined) throw new Error('PostgreSQL did not return the submission');
 
+        if (payload.documentIds.length > 0) {
+          const attached = await transaction
+            .update(documents)
+            .set({ submissionId: created.id })
+            .where(
+              and(
+                inArray(documents.id, payload.documentIds),
+                eq(documents.maxUserId, maxUserId),
+                isNull(documents.submissionId),
+                eq(documents.scanStatus, 'clean'),
+                isNull(documents.deletedAt),
+                gt(documents.stagedExpiresAt, now),
+              ),
+            )
+            .returning({ id: documents.id });
+          if (attached.length !== new Set(payload.documentIds).size) {
+            throw new StoreConflictError('Uploaded materials changed during submission');
+          }
+        }
+
+        await transaction.insert(integrationOutbox).values([
+          ...buildTrackerOutboxRows({
+            hasMaterials: payload.links.length > 0 || payload.documentIds.length > 0,
+            now,
+            submissionDatabaseId: created.id,
+            submissionId: created.submissionId,
+          }),
+        ]);
+
         if (request.draftId !== undefined) {
           await transaction
             .delete(leadDrafts)
@@ -612,7 +658,31 @@ export class PostgresStage3Store implements Stage3Store {
       row = concurrent;
     }
 
-    return submissionFromRow(row);
+    const materialRows = await this.#database
+      .select({
+        id: documents.id,
+        originalName: documents.originalName,
+        mimeType: documents.mimeType,
+        sizeBytes: documents.sizeBytes,
+        sha256: documents.sha256,
+        scanStatus: documents.scanStatus,
+        createdAt: documents.createdAt,
+      })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.submissionId, row.id),
+          eq(documents.maxUserId, maxUserId),
+          isNull(documents.deletedAt),
+        ),
+      );
+    return submissionFromRow(
+      row,
+      materialRows.map((document) => ({
+        ...document,
+        createdAt: document.createdAt.toISOString(),
+      })),
+    );
   }
 
   public async getSubmission(

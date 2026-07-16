@@ -90,7 +90,7 @@ if [[ "${1:-}" != "--force" && -s "${LAST_RUN_FILE}" ]]; then
   fi
 fi
 
-echo "Applying the configured Stage 4 retention windows..."
+echo "Applying the configured Stage 6 metadata retention windows..."
 psql --no-psqlrc --set=ON_ERROR_STOP=1 \
   --set="submission_days=${SUBMISSION_RETENTION_DAYS}" \
   --set="log_days=${LOG_RETENTION_DAYS}" <<'RETENTION_SQL'
@@ -126,16 +126,14 @@ DELETE FROM bot_dialogs AS candidate
        FROM webhook_inbox
       WHERE webhook_inbox.chat_id = candidate.chat_id
    );
-DELETE FROM integration_outbox
- WHERE completed_at IS NOT NULL
-   AND completed_at < clock_timestamp() - make_interval(days => :log_days);
-DELETE FROM submissions
- WHERE created_at < clock_timestamp() - make_interval(days => :submission_days);
+DELETE FROM document_access_grants
+ WHERE expires_at <= clock_timestamp();
 DELETE FROM max_users AS candidate
  WHERE NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.max_user_id = candidate.max_user_id)
    AND NOT EXISTS (SELECT 1 FROM lead_drafts WHERE lead_drafts.max_user_id = candidate.max_user_id)
    AND NOT EXISTS (SELECT 1 FROM submissions WHERE submissions.max_user_id = candidate.max_user_id)
-   AND NOT EXISTS (SELECT 1 FROM documents WHERE documents.max_user_id = candidate.max_user_id);
+   AND NOT EXISTS (SELECT 1 FROM documents WHERE documents.max_user_id = candidate.max_user_id)
+   AND NOT EXISTS (SELECT 1 FROM upload_sessions WHERE upload_sessions.max_user_id = candidate.max_user_id);
 COMMIT;
 RETENTION_SQL
 

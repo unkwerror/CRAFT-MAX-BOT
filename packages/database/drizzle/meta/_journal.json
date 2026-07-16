@@ -22,6 +22,20 @@
       "when": 1784168006516,
       "tag": "0002_stage4_bot_webhook",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784176119001,
+      "tag": "0003_stage5_secure_uploads",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784176213204,
+      "tag": "0004_stage6_tracker_outbox",
+      "breakpoints": true
     }
   ]
 }

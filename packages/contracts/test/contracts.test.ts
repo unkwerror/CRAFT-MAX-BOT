@@ -5,6 +5,8 @@ import {
   CaseCatalogItemSchema,
   CaseCatalogQuerySchema,
   CaseCatalogResponseSchema,
+  DocumentDownloadLinkResponseSchema,
+  DocumentDownloadQuerySchema,
   DocumentSchema,
   HealthLiveResponseSchema,
   HealthReadyResponseSchema,
@@ -380,27 +382,33 @@ describe('catalog and lead draft', () => {
 });
 
 describe('uploads', () => {
-  it('accepts an allowed file within the MVP limit', () => {
+  it('accepts upload metadata without a client-provided hash', () => {
     expect(
       UploadInitRequestSchema.safeParse({
         fileName: 'brief.pdf',
         mimeType: 'application/pdf',
         sizeBytes: MAX_UPLOAD_BYTES,
-        sha256: SHA256,
       }).success,
     ).toBe(true);
     expect(
       UploadCompleteRequestSchema.safeParse({
         sizeBytes: 1_024,
-        sha256: SHA256.toUpperCase(),
       }).success,
     ).toBe(true);
+  });
+
+  it('rejects legacy client-provided hashes in strict upload requests', () => {
     expect(
-      UploadCompleteRequestSchema.parse({
+      UploadInitRequestSchema.safeParse({
+        fileName: 'brief.pdf',
+        mimeType: 'application/pdf',
         sizeBytes: 1_024,
-        sha256: SHA256.toUpperCase(),
-      }).sha256,
-    ).toBe(SHA256);
+        sha256: SHA256,
+      }).success,
+    ).toBe(false);
+    expect(
+      UploadCompleteRequestSchema.safeParse({ sizeBytes: 1_024, sha256: SHA256 }).success,
+    ).toBe(false);
   });
 
   it('rejects path traversal, executable extensions and oversized files', () => {
@@ -447,6 +455,28 @@ describe('uploads', () => {
         mimeType: 'image/png',
       }).success,
     ).toBe(false);
+  });
+
+  it('validates temporary signed download links without accepting arbitrary schemes', () => {
+    expect(
+      DocumentDownloadLinkResponseSchema.safeParse({
+        downloadUrl: `https://craft72app.ru/files/${UUID}?grant=${UUID}&expires=1784103300&signature=${SHA256}`,
+        expiresAt: NOW,
+      }).success,
+    ).toBe(true);
+    expect(
+      DocumentDownloadLinkResponseSchema.safeParse({
+        downloadUrl: `javascript:alert(1)`,
+        expiresAt: NOW,
+      }).success,
+    ).toBe(false);
+    expect(
+      DocumentDownloadQuerySchema.parse({
+        grant: UUID,
+        expires: '1784103300',
+        signature: SHA256.toUpperCase(),
+      }),
+    ).toEqual({ grant: UUID, expires: 1_784_103_300, signature: SHA256 });
   });
 });
 

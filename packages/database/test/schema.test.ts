@@ -6,6 +6,9 @@ import {
   botDialogs,
   botInquiries,
   botInquiryStatusEnum,
+  documentAccessGrants,
+  documentScanJobs,
+  documentScanJobStatusEnum,
   documents,
   integrationOperationEnum,
   integrationOutbox,
@@ -16,6 +19,8 @@ import {
   maxUsers,
   sessions,
   submissions,
+  uploadSessions,
+  uploadSessionStatusEnum,
   webhookInbox,
 } from '../src/schema.js';
 
@@ -32,6 +37,9 @@ describe('database schema', () => {
       botInquiries,
       maxBotOutbox,
       integrationOutbox,
+      uploadSessions,
+      documentScanJobs,
+      documentAccessGrants,
     ].map((table) => getTableConfig(table).name);
 
     expect(names).toEqual([
@@ -45,6 +53,9 @@ describe('database schema', () => {
       'bot_inquiries',
       'max_bot_outbox',
       'integration_outbox',
+      'upload_sessions',
+      'document_scan_jobs',
+      'document_access_grants',
     ]);
   });
 
@@ -85,6 +96,24 @@ describe('database schema', () => {
     ]);
   });
 
+  it('limits secure upload and scan state to explicit durable transitions', () => {
+    expect(uploadSessionStatusEnum.enumValues).toEqual([
+      'initialized',
+      'uploading',
+      'uploaded',
+      'completed',
+      'rejected',
+      'expired',
+    ]);
+    expect(documentScanJobStatusEnum.enumValues).toEqual([
+      'pending',
+      'processing',
+      'retry',
+      'completed',
+      'dead_letter',
+    ]);
+  });
+
   it('limits durable bot state and actions to the approved Stage 4 values', () => {
     expect(botDialogStatusEnum.enumValues).toEqual(['active', 'stopped']);
     expect(botInquiryStatusEnum.enumValues).toEqual(['received', 'forwarded', 'closed']);
@@ -103,7 +132,10 @@ describe('database schema', () => {
     expect(getTableConfig(leadDrafts).foreignKeys).toHaveLength(1);
     expect(getTableConfig(submissions).foreignKeys).toHaveLength(1);
     expect(getTableConfig(documents).foreignKeys).toHaveLength(2);
-    expect(getTableConfig(integrationOutbox).foreignKeys).toHaveLength(1);
+    expect(getTableConfig(integrationOutbox).foreignKeys).toHaveLength(2);
+    expect(getTableConfig(uploadSessions).foreignKeys).toHaveLength(2);
+    expect(getTableConfig(documentScanJobs).foreignKeys).toHaveLength(1);
+    expect(getTableConfig(documentAccessGrants).foreignKeys).toHaveLength(1);
     expect(getTableConfig(botDialogs).foreignKeys).toHaveLength(0);
     expect(getTableConfig(botInquiries).foreignKeys).toHaveLength(1);
     expect(getTableConfig(maxBotOutbox).foreignKeys).toHaveLength(1);
@@ -246,6 +278,62 @@ describe('database schema', () => {
     expect(documents.maxUserId.notNull).toBe(true);
     expect(config.indexes.map(({ config: { name } }) => name)).toContain(
       'documents_staged_user_sha256_uidx',
+    );
+    expect(config.uniqueConstraints.map(({ name }) => name)).toContain('documents_id_user_unique');
+    expect(documents.uploadedAt.notNull).toBe(true);
+    expect(documents.detectedMimeType.notNull).toBe(true);
+    expect(documents.detectedFileType.notNull).toBe(true);
+  });
+
+  it('stores only hashed upload capabilities and revocable access grants', () => {
+    const uploadConfig = getTableConfig(uploadSessions);
+    const grantConfig = getTableConfig(documentAccessGrants);
+    const scanConfig = getTableConfig(documentScanJobs);
+
+    expect(uploadSessions.capabilityHash.notNull).toBe(true);
+    expect(uploadSessions.capabilityHash.getSQLType()).toBe('varchar(64)');
+    expect(uploadSessions.documentId.notNull).toBe(false);
+    expect(uploadConfig.uniqueConstraints.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'upload_sessions_capability_hash_unique',
+        'upload_sessions_quarantine_storage_key_unique',
+        'upload_sessions_document_id_unique',
+      ]),
+    );
+    expect(uploadConfig.checks.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'upload_sessions_capability_hash_format',
+        'upload_sessions_received_metadata_consistent',
+        'upload_sessions_lease_matches_status',
+        'upload_sessions_document_matches_status',
+      ]),
+    );
+    expect(scanConfig.uniqueConstraints.map(({ name }) => name)).toContain(
+      'document_scan_jobs_document_id_unique',
+    );
+    expect(grantConfig.uniqueConstraints.map(({ name }) => name)).toContain(
+      'document_access_grants_token_hash_unique',
+    );
+    expect(documentAccessGrants.tokenHash.getSQLType()).toBe('varchar(64)');
+  });
+
+  it('enforces Tracker dependency ordering and fenced processing claims', () => {
+    const config = getTableConfig(integrationOutbox);
+    const checks = config.checks.map(({ name }) => name);
+    const foreignKeys = config.foreignKeys.map((foreignKey) => foreignKey.getName());
+
+    expect(integrationOutbox.dependsOnOperation.notNull).toBe(false);
+    expect(integrationOutbox.leaseToken.notNull).toBe(false);
+    expect(integrationOutbox.leaseExpiresAt.notNull).toBe(false);
+    expect(integrationOutbox.resultKey.notNull).toBe(false);
+    expect(foreignKeys).toContain('integration_outbox_dependency_fk');
+    expect(checks).toEqual(
+      expect.arrayContaining([
+        'integration_outbox_dependency_matches_operation',
+        'integration_outbox_lease_matches_status',
+        'integration_outbox_result_key_matches_status',
+        'integration_outbox_last_error_consistent',
+      ]),
     );
   });
 });

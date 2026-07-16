@@ -115,7 +115,6 @@ export const UploadInitRequestSchema = z
     fileName: UploadFileNameSchema,
     mimeType: AllowedUploadMimeTypeSchema,
     sizeBytes: z.number().int().positive().max(MAX_UPLOAD_BYTES),
-    sha256: Sha256Schema.optional(),
   })
   .superRefine((upload, context) => {
     if (!mimeTypeMatchesFileExtension(upload.fileName, upload.mimeType)) {
@@ -131,8 +130,11 @@ export type UploadInitRequest = z.infer<typeof UploadInitRequestSchema>;
 export const UploadInitResponseSchema = z.strictObject({
   uploadId: UuidSchema,
   uploadUrl: HttpsUrlSchema,
-  method: z.enum(['PUT', 'POST']),
-  headers: z.record(z.string().min(1).max(128), z.string().max(2_048)),
+  method: z.literal('PUT'),
+  headers: z.strictObject({
+    'Content-Type': AllowedUploadMimeTypeSchema,
+    'X-Craft72-Upload-Token': z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'Invalid upload capability'),
+  }),
   expiresAt: IsoDateTimeSchema,
   maxBytes: z.number().int().positive().max(MAX_UPLOAD_BYTES),
 });
@@ -140,7 +142,6 @@ export type UploadInitResponse = z.infer<typeof UploadInitResponseSchema>;
 
 export const UploadCompleteRequestSchema = z.strictObject({
   sizeBytes: z.number().int().positive().max(MAX_UPLOAD_BYTES),
-  sha256: Sha256Schema,
 });
 export type UploadCompleteRequest = z.infer<typeof UploadCompleteRequestSchema>;
 
@@ -178,3 +179,16 @@ export const UploadCompleteResponseSchema = z.strictObject({
   document: DocumentSchema,
 });
 export type UploadCompleteResponse = z.infer<typeof UploadCompleteResponseSchema>;
+
+export const DocumentDownloadQuerySchema = z.strictObject({
+  grant: UuidSchema,
+  expires: z.coerce.number().int().positive(),
+  signature: Sha256Schema,
+});
+export type DocumentDownloadQuery = z.infer<typeof DocumentDownloadQuerySchema>;
+
+export const DocumentDownloadLinkResponseSchema = z.strictObject({
+  downloadUrl: HttpsUrlSchema,
+  expiresAt: IsoDateTimeSchema,
+});
+export type DocumentDownloadLinkResponse = z.infer<typeof DocumentDownloadLinkResponseSchema>;

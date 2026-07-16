@@ -37,22 +37,49 @@ const runtimeEntry = migrationJournal.entries.find(({ tag }) => tag === '0001_st
 const botWebhookEntry = migrationJournal.entries.find(
   ({ tag }) => tag === '0002_stage4_bot_webhook',
 );
+const secureUploadsEntry = migrationJournal.entries.find(
+  ({ tag }) => tag === '0003_stage5_secure_uploads',
+);
+const trackerOutboxEntry = migrationJournal.entries.find(
+  ({ tag }) => tag === '0004_stage6_tracker_outbox',
+);
 
-if (initialEntry === undefined || runtimeEntry === undefined || botWebhookEntry === undefined) {
+if (
+  initialEntry === undefined ||
+  runtimeEntry === undefined ||
+  botWebhookEntry === undefined ||
+  secureUploadsEntry === undefined ||
+  trackerOutboxEntry === undefined
+) {
   throw new Error(
-    'Expected 0000_initial, 0001_stage3_runtime and 0002_stage4_bot_webhook migration journal entries',
+    'Expected migration journal entries from 0000_initial through 0004_stage6_tracker_outbox',
   );
 }
 
 const initialSqlUrl = new URL('../drizzle/0000_initial.sql', import.meta.url);
 const runtimeSqlUrl = new URL('../drizzle/0001_stage3_runtime.sql', import.meta.url);
 const botWebhookSqlUrl = new URL('../drizzle/0002_stage4_bot_webhook.sql', import.meta.url);
+const secureUploadsSqlUrl = new URL('../drizzle/0003_stage5_secure_uploads.sql', import.meta.url);
+const trackerOutboxSqlUrl = new URL('../drizzle/0004_stage6_tracker_outbox.sql', import.meta.url);
 const initialMigrationSql = readFileSync(initialSqlUrl, 'utf8');
 const runtimeMigrationSql = readFileSync(runtimeSqlUrl, 'utf8');
 const botWebhookMigrationSql = readFileSync(botWebhookSqlUrl, 'utf8');
+const secureUploadsMigrationSql = readFileSync(secureUploadsSqlUrl, 'utf8');
+const trackerOutboxMigrationSql = readFileSync(trackerOutboxSqlUrl, 'utf8');
+const secureUploadsPreflightSql = secureUploadsMigrationSql.split('--> statement-breakpoint')[0];
+const trackerOutboxPreflightSql = trackerOutboxMigrationSql.split('--> statement-breakpoint')[0];
+if (secureUploadsPreflightSql === undefined || trackerOutboxPreflightSql === undefined) {
+  throw new Error('Expected Stage 5 and Stage 6 fail-closed migration preflights');
+}
 const initialMigrationHash = createHash('sha256').update(initialMigrationSql).digest('hex');
 const runtimeMigrationHash = createHash('sha256').update(runtimeMigrationSql).digest('hex');
 const botWebhookMigrationHash = createHash('sha256').update(botWebhookMigrationSql).digest('hex');
+const secureUploadsMigrationHash = createHash('sha256')
+  .update(secureUploadsMigrationSql)
+  .digest('hex');
+const trackerOutboxMigrationHash = createHash('sha256')
+  .update(trackerOutboxMigrationSql)
+  .digest('hex');
 const initialDownMigration = readFileSync(
   new URL('../drizzle/rollback/0000_initial.down.sql', import.meta.url),
   'utf8',
@@ -63,6 +90,14 @@ const runtimeDownMigration = readFileSync(
 );
 const botWebhookDownMigration = readFileSync(
   new URL('../drizzle/rollback/0002_stage4_bot_webhook.down.sql', import.meta.url),
+  'utf8',
+);
+const secureUploadsDownMigration = readFileSync(
+  new URL('../drizzle/rollback/0003_stage5_secure_uploads.down.sql', import.meta.url),
+  'utf8',
+);
+const trackerOutboxDownMigration = readFileSync(
+  new URL('../drizzle/rollback/0004_stage6_tracker_outbox.down.sql', import.meta.url),
   'utf8',
 );
 const sessionEvidenceColumns = `
@@ -118,6 +153,49 @@ describe('migration rollback metadata', () => {
       'Stage 4 bot rollback refused: unexpected migration ledger entries exist',
     );
   });
+
+  it('fails Stage 5 closed on legacy documents and anchors its rollback', () => {
+    expect(secureUploadsMigrationSql).toContain(
+      'Stage 5 secure upload migration refused: documents must be empty',
+    );
+    expect(
+      secureUploadsMigrationSql.indexOf('Stage 5 secure upload migration refused'),
+    ).toBeLessThan(secureUploadsMigrationSql.indexOf('CREATE TYPE'));
+    for (const [entry, hash] of [
+      [initialEntry, initialMigrationHash],
+      [runtimeEntry, runtimeMigrationHash],
+      [botWebhookEntry, botWebhookMigrationHash],
+      [secureUploadsEntry, secureUploadsMigrationHash],
+    ] as const) {
+      expect(secureUploadsDownMigration).toContain(`WHERE "created_at" = ${entry.when}`);
+      expect(secureUploadsDownMigration).toContain(`AND "hash" = '${hash}'`);
+    }
+    expect(secureUploadsDownMigration).toContain(
+      'Stage 5 secure uploads rollback refused: unexpected migration ledger entries exist',
+    );
+  });
+
+  it('fails Stage 6 closed on queued work and anchors its rollback', () => {
+    expect(trackerOutboxMigrationSql).toContain(
+      'Stage 6 Tracker outbox migration refused: integration_outbox must be empty',
+    );
+    expect(
+      trackerOutboxMigrationSql.indexOf('Stage 6 Tracker outbox migration refused'),
+    ).toBeLessThan(trackerOutboxMigrationSql.indexOf('ALTER TABLE'));
+    for (const [entry, hash] of [
+      [initialEntry, initialMigrationHash],
+      [runtimeEntry, runtimeMigrationHash],
+      [botWebhookEntry, botWebhookMigrationHash],
+      [secureUploadsEntry, secureUploadsMigrationHash],
+      [trackerOutboxEntry, trackerOutboxMigrationHash],
+    ] as const) {
+      expect(trackerOutboxDownMigration).toContain(`WHERE "created_at" = ${entry.when}`);
+      expect(trackerOutboxDownMigration).toContain(`AND "hash" = '${hash}'`);
+    }
+    expect(trackerOutboxDownMigration).toContain(
+      'Stage 6 Tracker outbox rollback refused: unexpected migration ledger entries exist',
+    );
+  });
 });
 
 describeWithDatabase('PostgreSQL migrations', () => {
@@ -140,7 +218,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
     await pool.end();
   });
 
-  it('upgrades 0000 data through Stage 4, enforces constraints and rolls back safely', async () => {
+  it('upgrades 0000 data through Stage 6, enforces constraints and rolls back safely', async () => {
     const database = drizzle(pool);
     const initialMigrationFolder = makeInitialMigrationFolder();
 
@@ -190,6 +268,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
         [
           'bot_dialogs',
           'bot_inquiries',
+          'document_access_grants',
+          'document_scan_jobs',
           'documents',
           'integration_outbox',
           'lead_drafts',
@@ -197,6 +277,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
           'max_users',
           'sessions',
           'submissions',
+          'upload_sessions',
           'webhook_inbox',
         ],
       ],
@@ -204,6 +285,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
     expect(createdTables.rows.map(({ table_name: tableName }) => tableName)).toEqual([
       'bot_dialogs',
       'bot_inquiries',
+      'document_access_grants',
+      'document_scan_jobs',
       'documents',
       'integration_outbox',
       'lead_drafts',
@@ -211,6 +294,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
       'max_users',
       'sessions',
       'submissions',
+      'upload_sessions',
       'webhook_inbox',
     ]);
 
@@ -698,6 +782,251 @@ describeWithDatabase('PostgreSQL migrations', () => {
     );
     expect(durableBotRows.rows[0]).toEqual({ inquiries: '1', outbound: '2' });
 
+    const uploadSession = await pool.query<{ id: string }>(
+      `insert into "public"."upload_sessions" (
+         "max_user_id", "capability_hash", "original_name", "declared_mime_type",
+         "expected_size_bytes", "expected_sha256", "quarantine_storage_key", "expires_at"
+       ) values ($1, $2, 'brief.pdf', 'application/pdf', 1024, $3,
+                 'quarantine/stage5-brief', now() + interval '1 hour')
+       returning "id"`,
+      [maxUserId, '1'.repeat(64), '2'.repeat(64)],
+    );
+    await expect(
+      pool.query(
+        `insert into "public"."upload_sessions" (
+           "max_user_id", "capability_hash", "original_name", "declared_mime_type",
+           "expected_size_bytes", "quarantine_storage_key", "expires_at"
+         ) values ($1, $2, 'raw-token.pdf', 'application/pdf', 1024,
+                   'quarantine/stage5-raw-token', now() + interval '1 hour')`,
+        [maxUserId, 'raw-upload-capability'],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool.query(
+        `insert into "public"."upload_sessions" (
+           "max_user_id", "capability_hash", "original_name", "declared_mime_type",
+           "expected_size_bytes", "received_size_bytes", "quarantine_storage_key", "expires_at"
+         ) values ($1, $2, 'partial.pdf', 'application/pdf', 1024, 1024,
+                   'quarantine/stage5-partial', now() + interval '1 hour')`,
+        [maxUserId, '4'.repeat(64)],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool.query(
+        `update "public"."upload_sessions"
+            set "status" = 'uploading', "attempts" = 1
+          where "id" = $1`,
+        [uploadSession.rows[0]?.id],
+      ),
+    ).rejects.toThrow();
+    await pool.query(
+      `update "public"."upload_sessions"
+          set "status" = 'uploading',
+              "attempts" = 1,
+              "lease_token" = '00000000-0000-4000-8000-000000000001',
+              "lease_expires_at" = now() + interval '5 minutes'
+        where "id" = $1`,
+      [uploadSession.rows[0]?.id],
+    );
+    await pool.query(
+      `update "public"."upload_sessions"
+          set "status" = 'uploaded',
+              "received_size_bytes" = 1024,
+              "received_sha256" = $2,
+              "detected_mime_type" = 'application/pdf',
+              "detected_file_type" = 'pdf',
+              "uploaded_at" = now(),
+              "lease_token" = null,
+              "lease_expires_at" = null
+        where "id" = $1`,
+      [uploadSession.rows[0]?.id, '2'.repeat(64)],
+    );
+
+    const stagedDocument = await pool.query<{ id: string }>(
+      `insert into "public"."documents" (
+         "max_user_id", "original_name", "storage_key", "mime_type", "size_bytes", "sha256",
+         "detected_mime_type", "detected_file_type", "staged_expires_at"
+       ) values ($1, 'brief.pdf', 'private/stage5-brief', 'application/pdf', 1024, $2,
+                 'application/pdf', 'pdf', now() + interval '1 hour')
+       returning "id"`,
+      [maxUserId, '2'.repeat(64)],
+    );
+    await expect(
+      pool.query(
+        `update "public"."documents"
+            set "scan_status" = 'clean'
+          where "id" = $1`,
+        [stagedDocument.rows[0]?.id],
+      ),
+    ).rejects.toThrow();
+
+    const scanJob = await pool.query<{ id: string }>(
+      `insert into "public"."document_scan_jobs" ("document_id")
+       values ($1)
+       returning "id"`,
+      [stagedDocument.rows[0]?.id],
+    );
+    await expect(
+      pool.query(
+        `update "public"."document_scan_jobs"
+            set "status" = 'processing'
+          where "id" = $1`,
+        [scanJob.rows[0]?.id],
+      ),
+    ).rejects.toThrow();
+    await pool.query(
+      `update "public"."document_scan_jobs"
+          set "status" = 'processing',
+              "attempts" = 1,
+              "lease_token" = '00000000-0000-4000-8000-000000000002',
+              "lease_expires_at" = now() + interval '5 minutes'
+        where "id" = $1`,
+      [scanJob.rows[0]?.id],
+    );
+    await pool.query(
+      `update "public"."document_scan_jobs"
+          set "status" = 'completed',
+              "lease_token" = null,
+              "lease_expires_at" = null,
+              "finished_at" = now()
+        where "id" = $1`,
+      [scanJob.rows[0]?.id],
+    );
+    await pool.query(
+      `update "public"."documents"
+          set "scan_status" = 'clean',
+              "scan_engine" = 'test-scanner',
+              "scan_engine_version" = '1',
+              "scan_completed_at" = now(),
+              "available_at" = now()
+        where "id" = $1`,
+      [stagedDocument.rows[0]?.id],
+    );
+    const secondMaxUserId = '900000000000000002';
+    await pool.query(
+      `insert into "public"."max_users" ("max_user_id", "first_name")
+       values ($1, 'Other upload owner')`,
+      [secondMaxUserId],
+    );
+    await expect(
+      pool.query(
+        `insert into "public"."upload_sessions" (
+           "max_user_id", "capability_hash", "original_name", "declared_mime_type",
+           "expected_size_bytes", "received_size_bytes", "received_sha256",
+           "detected_mime_type", "detected_file_type", "quarantine_storage_key", "status",
+           "document_id", "expires_at", "uploaded_at", "completed_at"
+         ) values ($1, $2, 'foreign.pdf', 'application/pdf', 1024, 1024, $3,
+                   'application/pdf', 'pdf', 'quarantine/stage5-foreign', 'completed', $4,
+                   now() + interval '1 hour', now(), now())`,
+        [secondMaxUserId, '5'.repeat(64), '2'.repeat(64), stagedDocument.rows[0]?.id],
+      ),
+    ).rejects.toThrow();
+    await pool.query(
+      `update "public"."upload_sessions"
+          set "status" = 'completed', "document_id" = $2, "completed_at" = now()
+        where "id" = $1`,
+      [uploadSession.rows[0]?.id, stagedDocument.rows[0]?.id],
+    );
+
+    await expect(
+      pool.query(
+        `insert into "public"."document_access_grants"
+           ("document_id", "token_hash", "expires_at")
+         values ($1, 'raw-signed-token', now() + interval '5 minutes')`,
+        [stagedDocument.rows[0]?.id],
+      ),
+    ).rejects.toThrow();
+    await pool.query(
+      `insert into "public"."document_access_grants"
+         ("document_id", "token_hash", "expires_at")
+       values ($1, $2, now() + interval '5 minutes')`,
+      [stagedDocument.rows[0]?.id, '3'.repeat(64)],
+    );
+    await expect(pool.query(secureUploadsPreflightSql)).rejects.toThrow(/documents must be empty/u);
+
+    const trackerSubmissionId = legacySubmission.rows[0]?.id;
+    await pool.query(
+      `insert into "public"."integration_outbox"
+         ("submission_id", "operation", "idempotency_key")
+       values ($1, 'upsert_partner', 'tracker:TEST-0001:part:v1')`,
+      [trackerSubmissionId],
+    );
+    await expect(
+      pool.query(
+        `insert into "public"."integration_outbox"
+           ("submission_id", "operation", "idempotency_key")
+         values ($1, 'create_crm', 'tracker:TEST-0001:invalid-crm:v1')`,
+        [trackerSubmissionId],
+      ),
+    ).rejects.toThrow();
+    await pool.query(
+      `insert into "public"."integration_outbox"
+         ("submission_id", "operation", "depends_on_operation", "idempotency_key")
+       values ($1, 'create_crm', 'upsert_partner', 'tracker:TEST-0001:crm:v1')`,
+      [trackerSubmissionId],
+    );
+    await pool.query(
+      `insert into "public"."integration_outbox"
+         ("submission_id", "operation", "depends_on_operation", "idempotency_key")
+       values ($1, 'create_docs', 'create_crm', 'tracker:TEST-0001:docs:v1')`,
+      [trackerSubmissionId],
+    );
+    await expect(
+      pool.query(
+        `update "public"."integration_outbox"
+            set "status" = 'processing'
+          where "submission_id" = $1 and "operation" = 'upsert_partner'`,
+        [trackerSubmissionId],
+      ),
+    ).rejects.toThrow();
+    await pool.query(
+      `update "public"."integration_outbox"
+          set "status" = 'processing',
+              "attempts" = 1,
+              "lease_token" = '00000000-0000-4000-8000-000000000003',
+              "lease_expires_at" = now() + interval '5 minutes'
+        where "submission_id" = $1 and "operation" = 'upsert_partner'`,
+      [trackerSubmissionId],
+    );
+    await expect(
+      pool.query(
+        `update "public"."integration_outbox"
+            set "status" = 'completed',
+                "completed_at" = now(),
+                "lease_token" = null,
+                "lease_expires_at" = null
+          where "submission_id" = $1 and "operation" = 'upsert_partner'`,
+        [trackerSubmissionId],
+      ),
+    ).rejects.toThrow();
+    await pool.query(
+      `update "public"."integration_outbox"
+          set "status" = 'completed',
+              "result_key" = 'PART-1001',
+              "completed_at" = now(),
+              "lease_token" = null,
+              "lease_expires_at" = null
+        where "submission_id" = $1 and "operation" = 'upsert_partner'`,
+      [trackerSubmissionId],
+    );
+    await expect(
+      pool.query(
+        `update "public"."integration_outbox"
+            set "status" = 'retry', "last_error_code" = 'timeout'
+          where "submission_id" = $1 and "operation" = 'create_crm'`,
+        [trackerSubmissionId],
+      ),
+    ).rejects.toThrow();
+    await pool.query(
+      `update "public"."integration_outbox"
+          set "status" = 'retry', "last_error_code" = 'timeout', "last_error_at" = now()
+        where "submission_id" = $1 and "operation" = 'create_crm'`,
+      [trackerSubmissionId],
+    );
+    await expect(pool.query(trackerOutboxPreflightSql)).rejects.toThrow(
+      /integration_outbox must be empty/u,
+    );
+
     const appliedLedgerRows = await pool.query<{ created_at: string; hash: string }>(
       `select "created_at"::text as "created_at", "hash"
          from "drizzle"."__drizzle_migrations"
@@ -707,6 +1036,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { created_at: String(initialEntry.when), hash: initialMigrationHash },
       { created_at: String(runtimeEntry.when), hash: runtimeMigrationHash },
       { created_at: String(botWebhookEntry.when), hash: botWebhookMigrationHash },
+      { created_at: String(secureUploadsEntry.when), hash: secureUploadsMigrationHash },
+      { created_at: String(trackerOutboxEntry.when), hash: trackerOutboxMigrationHash },
     ]);
 
     await expect(pool.query(initialDownMigration)).rejects.toThrow(
@@ -719,20 +1050,95 @@ describeWithDatabase('PostgreSQL migrations', () => {
     );
     await pool.query('rollback');
 
+    await expect(pool.query(botWebhookDownMigration)).rejects.toThrow(
+      /unexpected migration ledger entries exist/u,
+    );
+    await pool.query('rollback');
+
+    await expect(pool.query(secureUploadsDownMigration)).rejects.toThrow(
+      /unexpected migration ledger entries exist/u,
+    );
+    await pool.query('rollback');
+
     await pool.query(
       `insert into "drizzle"."__drizzle_migrations" ("hash", "created_at")
        values ($1, $2)`,
-      ['future-migration-test-entry', botWebhookEntry.when + 1],
+      ['future-migration-test-entry', trackerOutboxEntry.when + 1],
     );
-    await expect(pool.query(botWebhookDownMigration)).rejects.toThrow(
+    await expect(pool.query(trackerOutboxDownMigration)).rejects.toThrow(
       /unexpected migration ledger entries exist/u,
     );
     await pool.query('rollback');
     await pool.query(
       `delete from "drizzle"."__drizzle_migrations"
         where "created_at" = $1`,
-      [botWebhookEntry.when + 1],
+      [trackerOutboxEntry.when + 1],
     );
+
+    await pool.query(trackerOutboxDownMigration);
+
+    const trackerColumnsAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'integration_outbox'
+          and column_name = any($1::text[])`,
+      [['depends_on_operation', 'lease_token', 'lease_expires_at', 'result_key', 'last_error_at']],
+    );
+    const trackerLedgerAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from "drizzle"."__drizzle_migrations"
+        where "created_at" = $1`,
+      [trackerOutboxEntry.when],
+    );
+    expect(trackerColumnsAfterRollback.rows[0]?.count).toBe('0');
+    expect(trackerLedgerAfterRollback.rows[0]?.count).toBe('0');
+
+    await pool.query(secureUploadsDownMigration);
+
+    const uploadTablesAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from information_schema.tables
+        where table_schema = 'public'
+          and table_name = any($1::text[])`,
+      [['upload_sessions', 'document_scan_jobs', 'document_access_grants']],
+    );
+    const documentColumnsAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'documents'
+          and column_name = any($1::text[])`,
+      [
+        [
+          'detected_mime_type',
+          'detected_file_type',
+          'uploaded_at',
+          'scan_engine',
+          'scan_engine_version',
+          'scan_completed_at',
+          'available_at',
+        ],
+      ],
+    );
+    const uploadEnumsAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from pg_type as type
+         join pg_namespace as namespace on namespace.oid = type.typnamespace
+        where namespace.nspname = 'public'
+          and type.typname = any($1::text[])`,
+      [['upload_session_status', 'document_scan_job_status']],
+    );
+    const uploadLedgerAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from "drizzle"."__drizzle_migrations"
+        where "created_at" = $1`,
+      [secureUploadsEntry.when],
+    );
+    expect(uploadTablesAfterRollback.rows[0]?.count).toBe('0');
+    expect(documentColumnsAfterRollback.rows[0]?.count).toBe('0');
+    expect(uploadEnumsAfterRollback.rows[0]?.count).toBe('0');
+    expect(uploadLedgerAfterRollback.rows[0]?.count).toBe('0');
 
     await pool.query(botWebhookDownMigration);
 
@@ -814,6 +1220,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
         [
           'bot_dialogs',
           'bot_inquiries',
+          'document_access_grants',
+          'document_scan_jobs',
           'documents',
           'integration_outbox',
           'lead_drafts',
@@ -821,6 +1229,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
           'max_users',
           'sessions',
           'submissions',
+          'upload_sessions',
           'webhook_inbox',
         ],
       ],
@@ -829,7 +1238,15 @@ describeWithDatabase('PostgreSQL migrations', () => {
       `select count(*)::text as count
          from "drizzle"."__drizzle_migrations"
         where "created_at" = any($1::bigint[])`,
-      [[initialEntry.when, runtimeEntry.when, botWebhookEntry.when]],
+      [
+        [
+          initialEntry.when,
+          runtimeEntry.when,
+          botWebhookEntry.when,
+          secureUploadsEntry.when,
+          trackerOutboxEntry.when,
+        ],
+      ],
     );
     const remainingEnums = await pool.query<{ count: string }>(
       `select count(*)::text as count
@@ -842,6 +1259,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
           'bot_dialog_status',
           'bot_inquiry_status',
           'customer_role',
+          'document_scan_job_status',
           'document_scan_status',
           'integration_operation',
           'integration_outbox_status',
@@ -849,6 +1267,7 @@ describeWithDatabase('PostgreSQL migrations', () => {
           'max_bot_outbox_status',
           'project_scope',
           'submission_status',
+          'upload_session_status',
           'webhook_inbox_status',
         ],
       ],

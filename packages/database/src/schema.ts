@@ -51,6 +51,23 @@ export const documentScanStatusEnum = pgEnum('document_scan_status', [
   'failed',
 ]);
 
+export const uploadSessionStatusEnum = pgEnum('upload_session_status', [
+  'initialized',
+  'uploading',
+  'uploaded',
+  'completed',
+  'rejected',
+  'expired',
+]);
+
+export const documentScanJobStatusEnum = pgEnum('document_scan_job_status', [
+  'pending',
+  'processing',
+  'retry',
+  'completed',
+  'dead_letter',
+]);
+
 export const webhookInboxStatusEnum = pgEnum('webhook_inbox_status', [
   'pending',
   'processing',
@@ -370,8 +387,15 @@ export const documents = pgTable(
     mimeType: varchar('mime_type', { length: 255 }).notNull(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
     sha256: varchar('sha256', { length: 64 }).notNull(),
+    detectedMimeType: varchar('detected_mime_type', { length: 255 }).notNull(),
+    detectedFileType: varchar('detected_file_type', { length: 64 }).notNull(),
     scanStatus: documentScanStatusEnum('scan_status').default('pending').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
+    scanEngine: varchar('scan_engine', { length: 64 }),
+    scanEngineVersion: varchar('scan_engine_version', { length: 128 }),
+    scanCompletedAt: timestamp('scan_completed_at', { withTimezone: true }),
+    availableAt: timestamp('available_at', { withTimezone: true }),
     stagedExpiresAt: timestamp('staged_expires_at', { withTimezone: true }).notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
@@ -383,6 +407,7 @@ export const documents = pgTable(
     })
       .onDelete('cascade')
       .onUpdate('cascade'),
+    unique('documents_id_user_unique').on(table.id, table.maxUserId),
     unique('documents_storage_key_unique').on(table.storageKey),
     unique('documents_submission_sha256_unique').on(table.submissionId, table.sha256),
     uniqueIndex('documents_staged_user_sha256_uidx')
@@ -411,8 +436,35 @@ export const documents = pgTable(
         and position(chr(92) in ${table.storageKey}) = 0`,
     ),
     check('documents_mime_type_not_blank', sql`char_length(btrim(${table.mimeType})) > 0`),
+    check(
+      'documents_detected_mime_type_not_blank',
+      sql`char_length(btrim(${table.detectedMimeType})) > 0`,
+    ),
+    check(
+      'documents_detected_file_type_not_blank',
+      sql`char_length(btrim(${table.detectedFileType})) > 0`,
+    ),
     check('documents_size_positive', sql`${table.sizeBytes} > 0`),
     check('documents_sha256_format', sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
+    check('documents_upload_after_creation', sql`${table.uploadedAt} >= ${table.createdAt}`),
+    check(
+      'documents_scan_metadata_not_blank',
+      sql`(${table.scanEngine} is null or char_length(btrim(${table.scanEngine})) > 0)
+        and (${table.scanEngineVersion} is null or char_length(btrim(${table.scanEngineVersion})) > 0)`,
+    ),
+    check(
+      'documents_scan_timestamps_match_status',
+      sql`(${table.scanStatus} in ('pending', 'scanning')
+          and ${table.scanCompletedAt} is null and ${table.availableAt} is null)
+        or (${table.scanStatus} = 'clean'
+          and ${table.scanCompletedAt} is not null and ${table.availableAt} is not null)
+        or (${table.scanStatus} in ('infected', 'failed')
+          and ${table.scanCompletedAt} is not null and ${table.availableAt} is null)`,
+    ),
+    check(
+      'documents_availability_after_scan',
+      sql`${table.availableAt} is null or ${table.availableAt} >= ${table.scanCompletedAt}`,
+    ),
     check(
       'documents_deletion_after_creation',
       sql`${table.deletedAt} is null or ${table.deletedAt} >= ${table.createdAt}`,
@@ -421,6 +473,212 @@ export const documents = pgTable(
       'documents_staged_expiry_after_creation',
       sql`${table.submissionId} is not null or ${table.stagedExpiresAt} > ${table.createdAt}`,
     ),
+  ],
+);
+
+export const uploadSessions = pgTable(
+  'upload_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    maxUserId: bigint('max_user_id', { mode: 'bigint' })
+      .notNull()
+      .references(() => maxUsers.maxUserId, {
+        onDelete: 'cascade',
+        onUpdate: 'cascade',
+      }),
+    capabilityHash: varchar('capability_hash', { length: 64 }).notNull(),
+    originalName: text('original_name').notNull(),
+    declaredMimeType: varchar('declared_mime_type', { length: 255 }).notNull(),
+    expectedSizeBytes: bigint('expected_size_bytes', { mode: 'number' }).notNull(),
+    expectedSha256: varchar('expected_sha256', { length: 64 }),
+    receivedSizeBytes: bigint('received_size_bytes', { mode: 'number' }),
+    receivedSha256: varchar('received_sha256', { length: 64 }),
+    detectedMimeType: varchar('detected_mime_type', { length: 255 }),
+    detectedFileType: varchar('detected_file_type', { length: 64 }),
+    quarantineStorageKey: text('quarantine_storage_key').notNull(),
+    status: uploadSessionStatusEnum('status').default('initialized').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    lastErrorCode: varchar('last_error_code', { length: 128 }),
+    documentId: uuid('document_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    foreignKey({
+      name: 'upload_sessions_document_owner_fk',
+      columns: [table.documentId, table.maxUserId],
+      foreignColumns: [documents.id, documents.maxUserId],
+    })
+      .onDelete('restrict')
+      .onUpdate('cascade'),
+    unique('upload_sessions_capability_hash_unique').on(table.capabilityHash),
+    unique('upload_sessions_quarantine_storage_key_unique').on(table.quarantineStorageKey),
+    unique('upload_sessions_document_id_unique').on(table.documentId),
+    index('upload_sessions_owner_status_expiry_idx').on(
+      table.maxUserId,
+      table.status,
+      table.expiresAt,
+    ),
+    index('upload_sessions_expiry_idx')
+      .on(table.expiresAt)
+      .where(sql`${table.status} not in ('completed', 'expired')`),
+    check(
+      'upload_sessions_capability_hash_format',
+      sql`${table.capabilityHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'upload_sessions_original_name_safe',
+      sql`char_length(btrim(${table.originalName})) > 0
+        and position('/' in ${table.originalName}) = 0
+        and position(chr(92) in ${table.originalName}) = 0`,
+    ),
+    check(
+      'upload_sessions_quarantine_storage_key_safe',
+      sql`char_length(btrim(${table.quarantineStorageKey})) > 0
+        and left(${table.quarantineStorageKey}, 1) <> '/'
+        and position('..' in ${table.quarantineStorageKey}) = 0
+        and position(chr(92) in ${table.quarantineStorageKey}) = 0`,
+    ),
+    check(
+      'upload_sessions_declared_mime_type_not_blank',
+      sql`char_length(btrim(${table.declaredMimeType})) > 0`,
+    ),
+    check('upload_sessions_expected_size_positive', sql`${table.expectedSizeBytes} > 0`),
+    check(
+      'upload_sessions_expected_sha256_format',
+      sql`${table.expectedSha256} is null or ${table.expectedSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'upload_sessions_received_metadata_consistent',
+      sql`num_nonnulls(${table.receivedSizeBytes}, ${table.receivedSha256},
+          ${table.detectedMimeType}, ${table.detectedFileType}) = 0
+        or (num_nonnulls(${table.receivedSizeBytes}, ${table.receivedSha256},
+            ${table.detectedMimeType}, ${table.detectedFileType}) = 4
+          and ${table.receivedSizeBytes} > 0
+          and ${table.receivedSha256} ~ '^[0-9a-f]{64}$'
+          and char_length(btrim(${table.detectedMimeType})) > 0
+          and char_length(btrim(${table.detectedFileType})) > 0)`,
+    ),
+    check('upload_sessions_attempts_nonnegative', sql`${table.attempts} >= 0`),
+    check(
+      'upload_sessions_lease_matches_status',
+      sql`(${table.status} = 'uploading'
+          and ${table.leaseToken} is not null and ${table.leaseExpiresAt} is not null)
+        or (${table.status} <> 'uploading'
+          and ${table.leaseToken} is null and ${table.leaseExpiresAt} is null)`,
+    ),
+    check(
+      'upload_sessions_uploaded_metadata_matches_status',
+      sql`${table.status} not in ('uploaded', 'completed')
+        or (${table.receivedSizeBytes} is not null and ${table.uploadedAt} is not null)`,
+    ),
+    check(
+      'upload_sessions_document_matches_status',
+      sql`(${table.status} = 'completed'
+          and ${table.documentId} is not null and ${table.completedAt} is not null)
+        or (${table.status} <> 'completed'
+          and ${table.documentId} is null and ${table.completedAt} is null)`,
+    ),
+    check('upload_sessions_expiry_after_creation', sql`${table.expiresAt} > ${table.createdAt}`),
+    check(
+      'upload_sessions_upload_after_creation',
+      sql`${table.uploadedAt} is null or ${table.uploadedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      'upload_sessions_completion_after_upload',
+      sql`${table.completedAt} is null or ${table.completedAt} >= ${table.uploadedAt}`,
+    ),
+  ],
+);
+
+export const documentScanJobs = pgTable(
+  'document_scan_jobs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    status: documentScanJobStatusEnum('status').default('pending').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow().notNull(),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    lastErrorCode: varchar('last_error_code', { length: 128 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [
+    unique('document_scan_jobs_document_id_unique').on(table.documentId),
+    index('document_scan_jobs_ready_idx')
+      .on(table.status, table.nextAttemptAt, table.createdAt)
+      .where(sql`${table.status} in ('pending', 'retry')`),
+    check('document_scan_jobs_attempts_nonnegative', sql`${table.attempts} >= 0`),
+    check(
+      'document_scan_jobs_lease_matches_status',
+      sql`(${table.status} = 'processing'
+          and ${table.leaseToken} is not null and ${table.leaseExpiresAt} is not null)
+        or (${table.status} <> 'processing'
+          and ${table.leaseToken} is null and ${table.leaseExpiresAt} is null)`,
+    ),
+    check(
+      'document_scan_jobs_finished_at_matches_status',
+      sql`(${table.status} in ('completed', 'dead_letter') and ${table.finishedAt} is not null)
+        or (${table.status} not in ('completed', 'dead_letter') and ${table.finishedAt} is null)`,
+    ),
+  ],
+);
+
+export const documentAccessGrants = pgTable(
+  'document_access_grants',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => documents.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    audience: varchar('audience', { length: 64 }).default('craft72_employee').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    lastAccessedAt: timestamp('last_accessed_at', { withTimezone: true }),
+    accessCount: integer('access_count').default(0).notNull(),
+  },
+  (table) => [
+    unique('document_access_grants_token_hash_unique').on(table.tokenHash),
+    index('document_access_grants_document_idx').on(table.documentId),
+    index('document_access_grants_active_expiry_idx')
+      .on(table.expiresAt)
+      .where(sql`${table.revokedAt} is null`),
+    check('document_access_grants_token_hash_format', sql`${table.tokenHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'document_access_grants_audience_format',
+      sql`${table.audience} ~ '^[a-z][a-z0-9._:-]{2,63}$'`,
+    ),
+    check(
+      'document_access_grants_expiry_after_creation',
+      sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+    check(
+      'document_access_grants_revocation_after_creation',
+      sql`${table.revokedAt} is null or ${table.revokedAt} >= ${table.createdAt}`,
+    ),
+    check(
+      'document_access_grants_access_after_creation',
+      sql`${table.lastAccessedAt} is null or ${table.lastAccessedAt} >= ${table.createdAt}`,
+    ),
+    check('document_access_grants_access_count_nonnegative', sql`${table.accessCount} >= 0`),
   ],
 );
 
@@ -583,12 +841,17 @@ export const integrationOutbox = pgTable(
       .notNull()
       .references(() => submissions.id, { onDelete: 'cascade' }),
     operation: integrationOperationEnum('operation').notNull(),
+    dependsOnOperation: integrationOperationEnum('depends_on_operation'),
     idempotencyKey: varchar('idempotency_key', { length: 255 }).notNull(),
     payload: jsonb('payload').$type<JsonObject>().default(emptyJsonObject).notNull(),
     status: integrationOutboxStatusEnum('status').default('pending').notNull(),
     attempts: integer('attempts').default(0).notNull(),
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow().notNull(),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    resultKey: varchar('result_key', { length: 64 }),
     lastErrorCode: varchar('last_error_code', { length: 128 }),
+    lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
@@ -597,6 +860,13 @@ export const integrationOutbox = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }),
   },
   (table) => [
+    foreignKey({
+      name: 'integration_outbox_dependency_fk',
+      columns: [table.submissionId, table.dependsOnOperation],
+      foreignColumns: [table.submissionId, table.operation],
+    })
+      .onDelete('restrict')
+      .onUpdate('cascade'),
     unique('integration_outbox_idempotency_key_unique').on(table.idempotencyKey),
     unique('integration_outbox_submission_operation_unique').on(
       table.submissionId,
@@ -612,6 +882,35 @@ export const integrationOutbox = pgTable(
     ),
     check('integration_outbox_attempts_nonnegative', sql`${table.attempts} >= 0`),
     check(
+      'integration_outbox_dependency_matches_operation',
+      sql`(${table.operation} = 'upsert_partner' and ${table.dependsOnOperation} is null)
+        or (${table.operation} = 'create_crm'
+          and ${table.dependsOnOperation} is not null
+          and ${table.dependsOnOperation} = 'upsert_partner')
+        or (${table.operation} = 'create_docs'
+          and ${table.dependsOnOperation} is not null
+          and ${table.dependsOnOperation} = 'create_crm')`,
+    ),
+    check(
+      'integration_outbox_lease_matches_status',
+      sql`(${table.status} = 'processing'
+          and ${table.leaseToken} is not null and ${table.leaseExpiresAt} is not null)
+        or (${table.status} <> 'processing'
+          and ${table.leaseToken} is null and ${table.leaseExpiresAt} is null)`,
+    ),
+    check(
+      'integration_outbox_result_key_matches_status',
+      sql`(${table.status} = 'completed'
+          and ${table.resultKey} is not null and char_length(btrim(${table.resultKey})) > 0)
+        or (${table.status} <> 'completed' and ${table.resultKey} is null)`,
+    ),
+    check(
+      'integration_outbox_last_error_consistent',
+      sql`(${table.lastErrorCode} is null and ${table.lastErrorAt} is null)
+        or (${table.lastErrorCode} is not null and char_length(btrim(${table.lastErrorCode})) > 0
+          and ${table.lastErrorAt} is not null)`,
+    ),
+    check(
       'integration_outbox_completed_at_matches_status',
       sql`(${table.status} = 'completed' and ${table.completedAt} is not null)
         or (${table.status} <> 'completed' and ${table.completedAt} is null)`,
@@ -624,6 +923,7 @@ export const maxUsersRelations = relations(maxUsers, ({ many }) => ({
   leadDrafts: many(leadDrafts),
   submissions: many(submissions),
   documents: many(documents),
+  uploadSessions: many(uploadSessions),
 }));
 
 export const botDialogsRelations = relations(botDialogs, ({ many }) => ({
@@ -668,7 +968,7 @@ export const submissionsRelations = relations(submissions, ({ many, one }) => ({
   integrationOperations: many(integrationOutbox),
 }));
 
-export const documentsRelations = relations(documents, ({ one }) => ({
+export const documentsRelations = relations(documents, ({ many, one }) => ({
   maxUser: one(maxUsers, {
     fields: [documents.maxUserId],
     references: [maxUsers.maxUserId],
@@ -676,6 +976,34 @@ export const documentsRelations = relations(documents, ({ one }) => ({
   submission: one(submissions, {
     fields: [documents.submissionId],
     references: [submissions.id],
+  }),
+  uploadSession: one(uploadSessions),
+  scanJob: one(documentScanJobs),
+  accessGrants: many(documentAccessGrants),
+}));
+
+export const uploadSessionsRelations = relations(uploadSessions, ({ one }) => ({
+  maxUser: one(maxUsers, {
+    fields: [uploadSessions.maxUserId],
+    references: [maxUsers.maxUserId],
+  }),
+  document: one(documents, {
+    fields: [uploadSessions.documentId],
+    references: [documents.id],
+  }),
+}));
+
+export const documentScanJobsRelations = relations(documentScanJobs, ({ one }) => ({
+  document: one(documents, {
+    fields: [documentScanJobs.documentId],
+    references: [documents.id],
+  }),
+}));
+
+export const documentAccessGrantsRelations = relations(documentAccessGrants, ({ one }) => ({
+  document: one(documents, {
+    fields: [documentAccessGrants.documentId],
+    references: [documents.id],
   }),
 }));
 

@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
+import type { Readable } from 'node:stream';
 
 import {
+  ALLOWED_UPLOAD_MIME_TYPES,
   ApiErrorResponseSchema,
+  DocumentDownloadLinkResponseSchema,
+  DocumentDownloadQuerySchema,
   HealthLiveResponseSchema,
   HealthReadyResponseSchema,
   LeadDraftGetResponseSchema,
@@ -16,6 +20,11 @@ import {
   SubmissionCreateResponseSchema,
   SubmissionParamsSchema,
   SubmissionReadResponseSchema,
+  UploadCompleteRequestSchema,
+  UploadCompleteResponseSchema,
+  UploadIdParamsSchema,
+  UploadInitRequestSchema,
+  UploadInitResponseSchema,
   type ApiErrorCode,
   type ApiErrorIssue,
 } from '@craft72/contracts';
@@ -23,6 +32,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, {
+  LogController,
   type FastifyInstance,
   type FastifyRequest,
   type FastifyServerOptions,
@@ -42,6 +52,7 @@ import {
   type AuthenticatedSession,
   type Stage3Store,
 } from './repository.js';
+import { UploadServiceError, type SecureUploadService } from './upload-service.js';
 
 const AUTHORIZATION_PATTERN = /^Bearer ([A-Za-z0-9_-]{43})$/;
 
@@ -103,6 +114,7 @@ export interface Stage3ApiOptions {
   readonly consentVersion: string;
   readonly contactMaxAgeSeconds: number;
   readonly initDataMaxAgeSeconds: number;
+  readonly ipRateLimitMax: number;
   readonly logger?: FastifyServerOptions['logger'];
   readonly maxWebhookSecret: string;
   readonly now?: () => Date;
@@ -110,6 +122,22 @@ export interface Stage3ApiOptions {
   readonly rateLimitMax: number;
   readonly rateLimitWindowSeconds: number;
   readonly store: Stage3Store;
+  readonly uploads?: Pick<
+    SecureUploadService,
+    | 'completeUpload'
+    | 'createDownloadLink'
+    | 'getDocument'
+    | 'initializeUpload'
+    | 'isReady'
+    | 'open'
+    | 'receiveUpload'
+    | 'resolveDownload'
+  >;
+}
+
+function safeAttachmentName(value: string): string {
+  const fallback = value.replaceAll(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'document';
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(value)}`;
 }
 
 function validNow(clock: () => Date): Date {
@@ -164,22 +192,32 @@ export async function buildStage3Api(options: Stage3ApiOptions): Promise<Fastify
   );
   const app = Fastify({
     bodyLimit: 256 * 1_024,
-    disableRequestLogging: false,
+    logController: new LogController({ disableRequestLogging: true }),
     genReqId: () => randomUUID(),
     logger: options.logger ?? false,
     requestIdHeader: false,
     trustProxy: '127.0.0.1',
   });
 
+  app.addContentTypeParser([...ALLOWED_UPLOAD_MIME_TYPES], (_request, payload, done) => {
+    done(null, payload);
+  });
+
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(cors, {
-    allowedHeaders: ['authorization', 'content-type', 'x-request-id'],
-    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: [
+      'authorization',
+      'content-length',
+      'content-type',
+      'x-craft72-upload-token',
+      'x-request-id',
+    ],
+    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
     origin: allowedOrigin,
   });
   await app.register(rateLimit, {
     global: true,
-    max: options.rateLimitMax,
+    max: options.ipRateLimitMax,
     timeWindow: options.rateLimitWindowSeconds * 1_000,
   });
 
@@ -234,10 +272,41 @@ export async function buildStage3Api(options: Stage3ApiOptions): Promise<Fastify
         error.resource === 'draft'
           ? new ApiHttpError(404, 'DRAFT_NOT_FOUND', 'Draft not found')
           : new ApiHttpError(404, 'UPLOAD_NOT_FOUND', 'Uploaded material not found');
+    } else if (error instanceof UploadServiceError) {
+      switch (error.code) {
+        case 'invalid_file':
+          apiError = new ApiHttpError(
+            415,
+            'UNSUPPORTED_MEDIA_TYPE',
+            'The uploaded file did not pass validation',
+          );
+          break;
+        case 'conflict':
+        case 'not_clean':
+          apiError = new ApiHttpError(409, 'CONFLICT', 'The uploaded file is not ready');
+          break;
+        case 'unavailable':
+          apiError = new ApiHttpError(503, 'SERVICE_UNAVAILABLE', 'File service is unavailable');
+          break;
+        case 'expired':
+        case 'not_found':
+          apiError = new ApiHttpError(404, 'UPLOAD_NOT_FOUND', 'Uploaded material not found');
+          break;
+      }
     } else if (error instanceof ZodError) {
       apiError = new ApiHttpError(500, 'INTERNAL_ERROR', 'The server produced an invalid response');
     } else if (getStatusCode(error) === 429) {
       apiError = new ApiHttpError(429, 'RATE_LIMITED', 'Too many requests');
+    } else if (
+      getStatusCode(error) === 413 ||
+      getErrorCode(error) === 'FST_ERR_CTP_BODY_TOO_LARGE'
+    ) {
+      apiError = new ApiHttpError(413, 'PAYLOAD_TOO_LARGE', 'Request payload is too large');
+    } else if (
+      getStatusCode(error) === 415 ||
+      getErrorCode(error) === 'FST_ERR_CTP_INVALID_MEDIA_TYPE'
+    ) {
+      apiError = new ApiHttpError(415, 'UNSUPPORTED_MEDIA_TYPE', 'Media type is not supported');
     } else if (
       getStatusCode(error) === 400 ||
       getErrorCode(error) === 'FST_ERR_CTP_INVALID_JSON_BODY'
@@ -272,21 +341,35 @@ export async function buildStage3Api(options: Stage3ApiOptions): Promise<Fastify
 
   app.get('/health/ready', async (_request, reply) => {
     const startedAt = performance.now();
+    let databaseReady = true;
+    let scannerReady = true;
     try {
       await options.store.isReady();
-      return HealthReadyResponseSchema.parse({
-        status: 'ok',
-        timestamp: validNow(clock).toISOString(),
-        checks: { database: { status: 'ok', latencyMs: performance.now() - startedAt } },
-      });
     } catch {
-      const response = HealthReadyResponseSchema.parse({
-        status: 'unavailable',
-        timestamp: validNow(clock).toISOString(),
-        checks: { database: { status: 'error', latencyMs: performance.now() - startedAt } },
-      });
-      return reply.status(503).send(response);
+      databaseReady = false;
     }
+    if (options.uploads !== undefined) {
+      try {
+        await options.uploads.isReady();
+      } catch {
+        scannerReady = false;
+      }
+    }
+    const status = !databaseReady ? 'unavailable' : !scannerReady ? 'degraded' : 'ok';
+    const response = HealthReadyResponseSchema.parse({
+      status,
+      timestamp: validNow(clock).toISOString(),
+      checks: {
+        database: {
+          status: databaseReady ? 'ok' : 'error',
+          latencyMs: performance.now() - startedAt,
+        },
+        ...(options.uploads === undefined
+          ? {}
+          : { antivirus: { status: scannerReady ? 'ok' : 'error' } }),
+      },
+    });
+    return status === 'ok' ? response : reply.status(503).send(response);
   });
 
   app.post('/webhooks/max', { config: { rateLimit: false } }, async (request, reply) => {
@@ -369,6 +452,82 @@ export async function buildStage3Api(options: Stage3ApiOptions): Promise<Fastify
       verifiedAt: contact.verifiedAt.toISOString(),
     });
   });
+
+  if (options.uploads !== undefined) {
+    app.post('/api/uploads/init', async (request) => {
+      const session = await authenticate(request);
+      const body = parseWithSchema(UploadInitRequestSchema, request.body);
+      return UploadInitResponseSchema.parse(
+        await options.uploads?.initializeUpload(session.maxUserId, body),
+      );
+    });
+
+    app.put(
+      '/api/uploads/:id/content',
+      { bodyLimit: 50 * 1024 * 1024 + 1 },
+      async (request, reply) => {
+        const parameters = parseWithSchema(UploadIdParamsSchema, request.params);
+        const tokenHeader = request.headers['x-craft72-upload-token'];
+        const token = typeof tokenHeader === 'string' ? tokenHeader : '';
+        const lengthHeader = request.headers['content-length'];
+        const contentLength =
+          typeof lengthHeader === 'string' && /^\d+$/.test(lengthHeader)
+            ? Number(lengthHeader)
+            : null;
+        const contentType =
+          typeof request.headers['content-type'] === 'string'
+            ? request.headers['content-type']
+            : null;
+        if (request.body === null || typeof request.body !== 'object') {
+          throw new ApiHttpError(400, 'BAD_REQUEST', 'Upload body is required');
+        }
+        await options.uploads?.receiveUpload({
+          uploadId: parameters.id,
+          token,
+          contentLength,
+          contentType,
+          input: request.body as NodeJS.ReadableStream as Readable,
+        });
+        await reply.status(204).send();
+      },
+    );
+
+    app.post('/api/uploads/:id/complete', async (request) => {
+      const session = await authenticate(request);
+      const parameters = parseWithSchema(UploadIdParamsSchema, request.params);
+      const body = parseWithSchema(UploadCompleteRequestSchema, request.body);
+      return UploadCompleteResponseSchema.parse(
+        await options.uploads?.completeUpload(session.maxUserId, parameters.id, body),
+      );
+    });
+
+    app.get('/api/uploads/:id', async (request) => {
+      const session = await authenticate(request);
+      const parameters = parseWithSchema(UploadIdParamsSchema, request.params);
+      return UploadCompleteResponseSchema.parse({
+        document: await options.uploads?.getDocument(session.maxUserId, parameters.id),
+      });
+    });
+
+    app.post('/api/uploads/:id/download-link', async (request) => {
+      const session = await authenticate(request);
+      const parameters = parseWithSchema(UploadIdParamsSchema, request.params);
+      return DocumentDownloadLinkResponseSchema.parse(
+        await options.uploads?.createDownloadLink(session.maxUserId, parameters.id),
+      );
+    });
+
+    app.get('/files/:id', async (request, reply) => {
+      const parameters = parseWithSchema(UploadIdParamsSchema, request.params);
+      const query = parseWithSchema(DocumentDownloadQuerySchema, request.query);
+      const file = await options.uploads?.resolveDownload(parameters.id, query);
+      if (file === undefined) throw new UploadServiceError('not_found');
+      reply.header('content-disposition', safeAttachmentName(file.originalName));
+      reply.header('content-length', String(file.sizeBytes));
+      reply.header('content-type', file.mimeType);
+      return reply.send(options.uploads?.open(file.storageKey));
+    });
+  }
 
   app.get('/api/leads/draft', async (request) => {
     const session = await authenticate(request);

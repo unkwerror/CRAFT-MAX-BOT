@@ -7,9 +7,14 @@ import {
   type AllowedUploadExtension,
   type AllowedUploadMimeType,
   type Document,
+  type UploadCompleteRequest,
+  type UploadCompleteResponse,
+  type UploadInitRequest,
+  type UploadInitResponse,
 } from '@craft72/contracts/source';
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -21,9 +26,20 @@ import {
 import { InlineNotice, TextAreaField, TextField } from '../components/FormControls.js';
 import { Icon } from '../components/Icon.js';
 import { Page, ScreenHeader, StickyActions } from '../components/Layout.js';
-import type { MockUploadApi } from '../mock/upload-api.js';
 
 const MAX_DOCUMENTS = 20;
+const SCAN_POLL_INTERVAL_MILLISECONDS = 1_000;
+const SCAN_POLL_REQUEST_TIMEOUT_MILLISECONDS = 5_000;
+const SCAN_POLL_TIMEOUT_MILLISECONDS = 130_000;
+const TERMINAL_SCAN_POLL_ERROR_CODES = new Set([
+  'CONFLICT',
+  'FORBIDDEN',
+  'INVALID_REQUEST',
+  'INVALID_RESPONSE',
+  'NOT_FOUND',
+  'UNAUTHORIZED',
+  'UPLOAD_NOT_FOUND',
+]);
 const ACCEPTED_FILE_TYPES = ALLOWED_UPLOAD_EXTENSIONS.map((extension) => `.${extension}`).join(',');
 
 const FALLBACK_MIME_BY_EXTENSION: Readonly<Record<AllowedUploadExtension, AllowedUploadMimeType>> =
@@ -42,14 +58,34 @@ const FALLBACK_MIME_BY_EXTENSION: Readonly<Record<AllowedUploadExtension, Allowe
     ifc: 'application/octet-stream',
   };
 
-type UploadApi = Pick<MockUploadApi, 'completeUpload' | 'getDocument' | 'initUpload'>;
-type UploadStatus = 'complete' | 'error' | 'hashing' | 'queued' | 'uploading';
+type Awaitable<T> = Promise<T> | T;
+
+export interface UploadApi {
+  completeUpload(uploadId: string, input: UploadCompleteRequest): Awaitable<UploadCompleteResponse>;
+  getDocument(documentId: string): Document | null;
+  fetchDocument?(
+    documentId: string,
+    options: { readonly signal: AbortSignal; readonly timeoutMilliseconds: number },
+  ): Awaitable<UploadCompleteResponse>;
+  initUpload(input: UploadInitRequest): Awaitable<UploadInitResponse>;
+  uploadFile?(
+    initialized: UploadInitResponse,
+    file: File,
+    options: {
+      readonly onProgress: (progress: { readonly percent: number }) => void;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<void>;
+}
+
+type UploadStatus = 'checking' | 'complete' | 'error' | 'queued' | 'uploading';
 
 interface UploadItem {
-  readonly document?: Document;
-  readonly error?: string;
+  readonly document?: Document | undefined;
+  readonly error?: string | undefined;
   readonly file: File;
   readonly key: string;
+  readonly progress?: number | undefined;
   readonly status: UploadStatus;
 }
 
@@ -63,17 +99,33 @@ type FilePreparation =
   | { readonly data: PreparedFile; readonly success: true }
   | { readonly error: string; readonly success: false };
 
+class SafeUploadFlowError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = 'SafeUploadFlowError';
+  }
+}
+
+function isTerminalScanPollError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === 'string' && TERMINAL_SCAN_POLL_ERROR_CODES.has(code);
+}
+
 export interface UploadScreenProps {
   readonly description?: string;
+  readonly documentLookupAuthoritative?: boolean;
   readonly documentIds: readonly string[];
   readonly fileUploadsEnabled?: boolean;
   readonly onBack?: () => void;
   readonly onDocumentAdded: (documentId: string) => void;
+  readonly onDocumentDownload?: (documentId: string) => Promise<void> | void;
   readonly onDocumentRemoved?: (documentId: string) => void;
   readonly onDone?: () => void;
   readonly onDescriptionChange?: (description: string) => void;
   readonly onLinkChange?: (link: string) => void;
   readonly onToast?: (message: string) => void;
+  readonly serverBacked?: boolean;
   readonly uploadApi: UploadApi;
   readonly uploadLink?: string;
 }
@@ -138,33 +190,23 @@ function prepareFile(file: File): FilePreparation {
   };
 }
 
-async function readFileBytes(file: File): Promise<ArrayBuffer> {
-  if (typeof file.arrayBuffer === 'function') {
-    return file.arrayBuffer();
-  }
+function waitForScanPoll(signal: AbortSignal, milliseconds: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new SafeUploadFlowError('Проверка файла отменена.'));
+      return;
+    }
 
-  return new Promise<ArrayBuffer>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error('Не удалось прочитать файл'));
-    reader.onload = () => {
-      if (reader.result instanceof ArrayBuffer) {
-        resolve(reader.result);
-      } else {
-        reject(new Error('Не удалось прочитать файл'));
-      }
+    const handleAbort = (): void => {
+      window.clearTimeout(timer);
+      reject(new SafeUploadFlowError('Проверка файла отменена.'));
     };
-    reader.readAsArrayBuffer(file);
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener('abort', handleAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener('abort', handleAbort, { once: true });
   });
-}
-
-async function sha256(file: File): Promise<string> {
-  if (globalThis.crypto?.subtle === undefined) {
-    throw new Error('Web Crypto API is unavailable');
-  }
-
-  const bytes = await readFileBytes(file);
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function formatFileSize(sizeBytes: number): string {
@@ -181,12 +223,19 @@ function uploadStatus(item: UploadItem): { readonly error: boolean; readonly lab
   switch (item.status) {
     case 'queued':
       return { error: false, label: 'В очереди' };
-    case 'hashing':
-      return { error: false, label: 'Считаем SHA-256…' };
     case 'uploading':
-      return { error: false, label: 'Загружаем…' };
+      return {
+        error: false,
+        label: item.progress === undefined ? 'Загружаем…' : `Загружаем… ${String(item.progress)}%`,
+      };
+    case 'checking':
+      return item.document === undefined
+        ? { error: false, label: 'Проверяем файл…' }
+        : documentStatus(item.document);
     case 'complete':
-      return { error: false, label: 'Загружен и проверен' };
+      return item.document === undefined
+        ? { error: false, label: 'Загружен' }
+        : documentStatus(item.document);
     case 'error':
       return { error: true, label: item.error ?? 'Не удалось загрузить файл.' };
   }
@@ -211,16 +260,20 @@ type FileRowProps =
   | {
       readonly document: Document;
       readonly item?: never;
+      readonly onDownload?: () => void;
       readonly onRemove?: () => void;
+      readonly onRetry?: never;
     }
   | {
       readonly document?: never;
       readonly item: UploadItem;
+      readonly onDownload?: () => void;
       readonly onRemove?: () => void;
+      readonly onRetry?: () => void;
     };
 
 const FileRow = (props: FileRowProps) => {
-  const { onRemove } = props;
+  const { onDownload, onRemove, onRetry } = props;
   let name: string;
   let sizeBytes: number;
   let status: { readonly error: boolean; readonly label: string };
@@ -248,32 +301,96 @@ const FileRow = (props: FileRowProps) => {
         >
           {status.label}
         </span>
+        {props.item?.status === 'uploading' && props.item.progress !== undefined ? (
+          <progress
+            aria-label={`Прогресс загрузки файла ${name}`}
+            className="file-row__progress"
+            max={100}
+            value={props.item.progress}
+          />
+        ) : null}
       </div>
-      {onRemove === undefined ? null : (
-        <button
-          aria-label={`Удалить файл ${name}`}
-          className="file-row__remove"
-          onClick={onRemove}
-          type="button"
-        >
-          <Icon name="close" size={17} />
-        </button>
+      {onDownload === undefined && onRemove === undefined && onRetry === undefined ? null : (
+        <div className="file-row__actions">
+          {onDownload === undefined ? null : (
+            <button
+              aria-label={`Скачать файл ${name}`}
+              className="file-row__download"
+              onClick={onDownload}
+              type="button"
+            >
+              Скачать
+            </button>
+          )}
+          {onRetry === undefined ? null : (
+            <button
+              aria-label={`Повторить загрузку файла ${name}`}
+              className="file-row__retry"
+              onClick={onRetry}
+              type="button"
+            >
+              Повторить
+            </button>
+          )}
+          {onRemove === undefined ? null : (
+            <button
+              aria-label={`Удалить файл ${name}`}
+              className="file-row__remove"
+              onClick={onRemove}
+              type="button"
+            >
+              <Icon name="close" size={17} />
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
 };
 
+const ReferencedFileRow = ({
+  documentId,
+  onRemove,
+}: {
+  readonly documentId: string;
+  readonly onRemove?: () => void;
+}) => (
+  <div className="file-row">
+    <span className="file-row__icon">
+      <Icon name="file" size={21} />
+    </span>
+    <div>
+      <strong>Ранее загруженный файл</strong>
+      <small>Документ {documentId.slice(0, 8)}</small>
+      <span className="file-row__status">Прикреплён</span>
+    </div>
+    {onRemove === undefined ? null : (
+      <button
+        aria-label={`Удалить ранее загруженный файл ${documentId.slice(0, 8)}`}
+        className="file-row__remove"
+        onClick={onRemove}
+        type="button"
+      >
+        <Icon name="close" size={17} />
+      </button>
+    )}
+  </div>
+);
+
 export const UploadScreen = ({
   description = '',
+  documentLookupAuthoritative = true,
   documentIds,
   fileUploadsEnabled = true,
   onBack,
   onDocumentAdded,
+  onDocumentDownload,
   onDocumentRemoved,
   onDone,
   onDescriptionChange,
   onLinkChange,
   onToast,
+  serverBacked = false,
   uploadApi,
   uploadLink = '',
 }: UploadScreenProps) => {
@@ -283,6 +400,15 @@ export const UploadScreen = ({
   const dragDepth = useRef(0);
   const fileSequence = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadControllers = useRef(new Map<string, AbortController>());
+
+  useEffect(() => {
+    const controllers = uploadControllers.current;
+    return () => {
+      for (const controller of controllers.values()) controller.abort();
+      controllers.clear();
+    };
+  }, []);
 
   const updateItem = useCallback((key: string, update: Partial<UploadItem>) => {
     setItems((current) =>
@@ -299,28 +425,121 @@ export const UploadScreen = ({
         return;
       }
 
-      updateItem(item.key, { status: 'hashing' });
+      const controller = new AbortController();
+      uploadControllers.current.set(item.key, controller);
+      updateItem(item.key, {
+        document: undefined,
+        error: undefined,
+        progress: 0,
+        status: 'uploading',
+      });
 
       let document: Document;
       try {
-        const fileHash = await sha256(item.file);
-        const request = UploadInitRequestSchema.parse({ ...prepared.data, sha256: fileHash });
-        updateItem(item.key, { status: 'uploading' });
-        await Promise.resolve();
-        const initialized = uploadApi.initUpload(request);
-        const completed = uploadApi.completeUpload(initialized.uploadId, {
-          sha256: fileHash,
+        const request = UploadInitRequestSchema.parse(prepared.data);
+        const initialized = await uploadApi.initUpload(request);
+        if (controller.signal.aborted) return;
+        await uploadApi.uploadFile?.(initialized, item.file, {
+          onProgress: ({ percent }) => {
+            if (!controller.signal.aborted) updateItem(item.key, { progress: percent });
+          },
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        const completed = await uploadApi.completeUpload(initialized.uploadId, {
           sizeBytes: prepared.data.sizeBytes,
         });
+        if (
+          completed.document.id !== initialized.uploadId ||
+          completed.document.originalName !== prepared.data.fileName ||
+          completed.document.mimeType !== prepared.data.mimeType ||
+          completed.document.sizeBytes !== prepared.data.sizeBytes
+        ) {
+          throw new Error('Completed upload metadata does not match the selected file');
+        }
         document = completed.document;
-      } catch {
-        const message = 'Не удалось загрузить файл. Попробуйте ещё раз.';
+        const authoritativeSha256 = document.sha256;
+        if (document.scanStatus === 'pending' || document.scanStatus === 'scanning') {
+          if (uploadApi.fetchDocument === undefined) {
+            throw new SafeUploadFlowError('Не удалось проверить файл. Попробуйте ещё раз.');
+          }
+          updateItem(item.key, { document, progress: 100, status: 'checking' });
+          const scanDeadline = globalThis.performance.now() + SCAN_POLL_TIMEOUT_MILLISECONDS;
+          let firstPoll = true;
+          while (globalThis.performance.now() < scanDeadline) {
+            if (!firstPoll) {
+              await waitForScanPoll(
+                controller.signal,
+                Math.min(
+                  SCAN_POLL_INTERVAL_MILLISECONDS,
+                  scanDeadline - globalThis.performance.now(),
+                ),
+              );
+            }
+            firstPoll = false;
+            const remainingMilliseconds = scanDeadline - globalThis.performance.now();
+            if (remainingMilliseconds <= 0) break;
+            let refreshed: UploadCompleteResponse;
+            try {
+              refreshed = await uploadApi.fetchDocument(document.id, {
+                signal: controller.signal,
+                timeoutMilliseconds: Math.max(
+                  1,
+                  Math.floor(
+                    Math.min(SCAN_POLL_REQUEST_TIMEOUT_MILLISECONDS, remainingMilliseconds),
+                  ),
+                ),
+              });
+            } catch (error) {
+              if (controller.signal.aborted) return;
+              if (isTerminalScanPollError(error)) {
+                throw new SafeUploadFlowError('Не удалось проверить файл. Попробуйте ещё раз.');
+              }
+              continue;
+            }
+            if (
+              refreshed.document.id !== document.id ||
+              refreshed.document.originalName !== prepared.data.fileName ||
+              refreshed.document.mimeType !== prepared.data.mimeType ||
+              refreshed.document.sizeBytes !== prepared.data.sizeBytes ||
+              refreshed.document.sha256 !== authoritativeSha256
+            ) {
+              throw new Error('Refreshed upload metadata does not match the completed upload');
+            }
+            document = refreshed.document;
+            updateItem(item.key, { document, progress: 100, status: 'checking' });
+            if (document.scanStatus === 'clean') break;
+            if (document.scanStatus === 'infected') {
+              throw new SafeUploadFlowError('Файл не прошёл проверку безопасности.');
+            }
+            if (document.scanStatus === 'failed') {
+              throw new SafeUploadFlowError('Не удалось проверить файл. Попробуйте ещё раз.');
+            }
+          }
+          if (document.scanStatus !== 'clean') {
+            throw new SafeUploadFlowError(
+              'Проверка файла занимает слишком много времени. Попробуйте позже.',
+            );
+          }
+        } else if (document.scanStatus === 'infected') {
+          throw new SafeUploadFlowError('Файл не прошёл проверку безопасности.');
+        } else if (document.scanStatus === 'failed') {
+          throw new SafeUploadFlowError('Не удалось проверить файл. Попробуйте ещё раз.');
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        const message =
+          error instanceof SafeUploadFlowError
+            ? error.message
+            : 'Не удалось загрузить файл. Попробуйте ещё раз.';
         updateItem(item.key, { error: message, status: 'error' });
         onToast?.(message);
         return;
+      } finally {
+        uploadControllers.current.delete(item.key);
       }
 
-      updateItem(item.key, { document, status: 'complete' });
+      updateItem(item.key, { document, progress: 100, status: 'complete' });
       onDocumentAdded(document.id);
       onToast?.(`Файл «${document.originalName}» загружен`);
     },
@@ -403,15 +622,48 @@ export const UploadScreen = ({
 
   const staleDocumentIds = useMemo(
     () =>
-      documentIds.filter((documentId) => {
-        if (localDocumentIds.has(documentId)) return false;
-        try {
-          return uploadApi.getDocument(documentId) === null;
-        } catch {
-          return true;
-        }
-      }),
-    [documentIds, localDocumentIds, uploadApi],
+      documentLookupAuthoritative
+        ? documentIds.filter((documentId) => {
+            if (localDocumentIds.has(documentId)) return false;
+            try {
+              return uploadApi.getDocument(documentId) === null;
+            } catch {
+              return true;
+            }
+          })
+        : [],
+    [documentIds, documentLookupAuthoritative, localDocumentIds, uploadApi],
+  );
+
+  const unresolvedDocumentIds = useMemo(
+    () =>
+      documentLookupAuthoritative
+        ? []
+        : documentIds.filter((documentId, index) => {
+            if (documentIds.indexOf(documentId) !== index || localDocumentIds.has(documentId)) {
+              return false;
+            }
+            try {
+              return uploadApi.getDocument(documentId) === null;
+            } catch {
+              return true;
+            }
+          }),
+    [documentIds, documentLookupAuthoritative, localDocumentIds, uploadApi],
+  );
+
+  const retryItem = useCallback(
+    (item: UploadItem) => {
+      if (item.status !== 'error') return;
+      updateItem(item.key, {
+        document: undefined,
+        error: undefined,
+        progress: undefined,
+        status: 'queued',
+      });
+      void processItem(item);
+    },
+    [processItem, updateItem],
   );
 
   const removeItem = useCallback(
@@ -459,11 +711,14 @@ export const UploadScreen = ({
   };
 
   const hasPendingUploads = items.some(
-    (item) => item.status === 'hashing' || item.status === 'queued' || item.status === 'uploading',
+    (item) => item.status === 'checking' || item.status === 'queued' || item.status === 'uploading',
   );
-  const hasFileRows = externalDocuments.length > 0 || items.length > 0;
+  const hasFileRows =
+    externalDocuments.length > 0 || unresolvedDocumentIds.length > 0 || items.length > 0;
   const hasAttachedDocuments =
-    externalDocuments.length > 0 || items.some((item) => item.status === 'complete');
+    externalDocuments.length > 0 ||
+    unresolvedDocumentIds.length > 0 ||
+    items.some((item) => item.status === 'complete');
 
   return (
     <Page className="page--narrow" withNavigation={false}>
@@ -477,11 +732,17 @@ export const UploadScreen = ({
 
         <InlineNotice icon="shield" {...(fileUploadsEnabled ? {} : { tone: 'warning' })}>
           <strong>
-            {fileUploadsEnabled ? 'Демонстрационная загрузка' : 'Файловое хранилище подключается'}
+            {serverBacked
+              ? 'Защищённая загрузка'
+              : fileUploadsEnabled
+                ? 'Демонстрационная загрузка'
+                : 'Файловое хранилище подключается'}
           </strong>
-          {fileUploadsEnabled
-            ? 'В web preview сохраняются только mock-метаданные файла.'
-            : 'В production-режиме этапа 3 файлы не передаются на сервер. Добавьте HTTPS-ссылку на защищённое облако.'}
+          {serverBacked
+            ? 'Файлы передаются в закрытое хранилище и связываются только с вашей MAX-сессией.'
+            : fileUploadsEnabled
+              ? 'В web preview сохраняются только mock-метаданные файла.'
+              : 'Файлы пока не передаются на сервер. Добавьте HTTPS-ссылку на защищённое облако.'}
         </InlineNotice>
 
         <section aria-labelledby="upload-heading" className="form-card">
@@ -526,9 +787,7 @@ export const UploadScreen = ({
         {onDescriptionChange === undefined && onLinkChange === undefined ? null : (
           <section className="form-card">
             <h2 className="form-card__title">Комментарий к материалам</h2>
-            <p className="form-card__subtitle">
-              Эти поля сохраняются в общий черновик и не отправляются на этапе 2.
-            </p>
+            <p className="form-card__subtitle">Эти поля сохраняются в общий черновик.</p>
             <div className="form-stack">
               {onDescriptionChange === undefined ? null : (
                 <TextAreaField
@@ -587,21 +846,43 @@ export const UploadScreen = ({
                 <FileRow
                   document={document}
                   key={document.id}
+                  {...(onDocumentDownload === undefined || document.scanStatus !== 'clean'
+                    ? {}
+                    : { onDownload: () => onDocumentDownload(document.id) })}
                   {...(onDocumentRemoved === undefined
                     ? {}
                     : { onRemove: () => onDocumentRemoved(document.id) })}
                 />
               ))}
-              {items.map((item) => (
-                <FileRow
-                  item={item}
-                  key={item.key}
-                  {...(item.status === 'error' ||
-                  (item.status === 'complete' && onDocumentRemoved !== undefined)
-                    ? { onRemove: () => removeItem(item) }
-                    : {})}
+              {unresolvedDocumentIds.map((documentId) => (
+                <ReferencedFileRow
+                  documentId={documentId}
+                  key={documentId}
+                  {...(onDocumentRemoved === undefined
+                    ? {}
+                    : { onRemove: () => onDocumentRemoved(documentId) })}
                 />
               ))}
+              {items.map((item) => {
+                const downloadableDocument =
+                  item.document?.scanStatus === 'clean' ? item.document : null;
+                return (
+                  <FileRow
+                    item={item}
+                    key={item.key}
+                    {...(onDocumentDownload === undefined || downloadableDocument === null
+                      ? {}
+                      : {
+                          onDownload: () => onDocumentDownload(downloadableDocument.id),
+                        })}
+                    {...(item.status === 'error' ? { onRetry: () => retryItem(item) } : {})}
+                    {...(item.status === 'error' ||
+                    (item.status === 'complete' && onDocumentRemoved !== undefined)
+                      ? { onRemove: () => removeItem(item) }
+                      : {})}
+                  />
+                );
+              })}
             </div>
           </section>
         ) : null}

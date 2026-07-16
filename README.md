@@ -4,23 +4,23 @@ TypeScript monorepo for the CRAFT72 MAX bot, Mini App, API and durable integrati
 
 ## Current scope
 
-Stage 4 adds the MAX bot and authenticated webhook pipeline to the Stage 3 Mini App and API. The
-API durably deduplicates updates before acknowledging them; a separate worker handles `/start`,
-`bot_started`, `bot_stopped`, messages and callbacks, stores inquiries, and delivers deduplicated
-queued responses through the MAX API with bounded retries. A normal browser keeps a deterministic
-local preview, while credentials remain server-side and never enter the browser bundle.
+Stages 5 and 6 add secure project-file intake and a durable Yandex Tracker integration to the MAX
+bot/Mini App pipeline. Files are streamed to private quarantine, checked by extension, MIME,
+signature and ClamAV, and can be attached to a submission only after a clean verdict. The worker
+prepares the idempotent `PART → CRM → DOCS` chain through a transactional outbox.
 
-File upload and private storage are Stage 5. Yandex Tracker discovery and synchronization are
-strictly Stage 6; the Stage 4 worker does not send submissions to Tracker. Production MAX webhook
-registration remains an explicit Stage 8 operation rather than part of the deployment script.
+Tracker remains fail-closed in production dry-run until an accessible test queue, field taxonomy
+and assignee are approved. HTTP mutations require both `TRACKER_DRY_RUN=false` and the independent
+`TRACKER_PRODUCTION_WRITES_APPROVED=true` gate. Production MAX webhook registration also remains an
+explicit Stage 8 operation rather than part of deployment.
 
 Workspace layout:
 
 ```text
 apps/
-  api/          Fastify API and signed MAX runtime (Stage 3+)
+  api/          Fastify API, signed MAX runtime and private file intake
   miniapp/      React/Vite MAX Mini App and browser preview
-  worker/       MAX webhook inbox/outbox worker (Stage 4+)
+  worker/       MAX and Yandex Tracker durable workers
 packages/
   config/       Validated server configuration
   contracts/    Shared Zod API contracts

@@ -14,7 +14,7 @@ const validEnvironment = {
   API_PORT: '4100',
   PUBLIC_BASE_URL: 'https://craft72app.ru',
   PRIVACY_POLICY_URL: 'https://craft72app.ru/privacy.html',
-  CONSENT_VERSION: 'miniapp-2026-07-16',
+  CONSENT_VERSION: 'miniapp-2026-07-16-stage5',
   MAX_API_BASE_URL: 'https://platform-api2.max.ru',
   MAX_BOT_TOKEN: 'rotated-token-with-enough-length',
   MAX_BOT_PUBLIC_NAME: 'craft72_bot',
@@ -32,6 +32,7 @@ const validEnvironment = {
   SUBMISSION_RETENTION_DAYS: '1095',
   RETENTION_CLEANUP_INTERVAL_SECONDS: '21600',
   API_RATE_LIMIT_MAX: '120',
+  API_IP_RATE_LIMIT_MAX: '1200',
   API_RATE_LIMIT_WINDOW_SECONDS: '60',
   DATABASE_URL: 'postgresql://craft72:password@127.0.0.1:5432/craft72_max_app',
   DB_POOL_MAX: '10',
@@ -46,9 +47,31 @@ const validEnvironment = {
   TRACKER_QUEUE_PART: 'PART',
   TRACKER_QUEUE_DOCS: 'DOCS',
   TRACKER_DRY_RUN: 'true',
+  TRACKER_PRODUCTION_WRITES_APPROVED: 'false',
+  TRACKER_ASSIGNEE: '',
+  TRACKER_API_TIMEOUT_MS: '10000',
+  TRACKER_WORKER_POLL_INTERVAL_MS: '1000',
+  TRACKER_WORKER_LEASE_SECONDS: '90',
+  TRACKER_WORKER_MAX_ATTEMPTS: '8',
+  TRACKER_RETRY_BASE_MS: '1000',
+  TRACKER_RETRY_MAX_MS: '300000',
   UPLOAD_MAX_BYTES: '52428800',
   UPLOAD_STAGING_TTL_SECONDS: '86400',
   UPLOAD_STORAGE_PATH: '/srv/craft72-max-app/uploads',
+  UPLOAD_SIGNING_SECRET: 'upload-signing-secret-with-32-characters',
+  UPLOAD_DOWNLOAD_TTL_SECONDS: '900',
+  UPLOAD_LEASE_SECONDS: '900',
+  UPLOAD_MAX_ACTIVE_PER_USER: '5',
+  UPLOAD_MAX_STAGED_BYTES_PER_USER: '262144000',
+  UPLOAD_MAX_FILES_PER_USER: '100',
+  UPLOAD_MAX_TOTAL_BYTES_PER_USER: '1073741824',
+  CLAMAV_SOCKET_PATH: '/run/clamav/clamd.ctl',
+  CLAMAV_SCAN_TIMEOUT_MS: '120000',
+  FILE_SCAN_POLL_INTERVAL_MS: '1000',
+  FILE_SCAN_LEASE_SECONDS: '180',
+  FILE_SCAN_MAX_ATTEMPTS: '8',
+  FILE_SCAN_RETRY_BASE_MS: '5000',
+  FILE_SCAN_RETRY_MAX_MS: '300000',
   LOG_LEVEL: 'info',
   LOG_RETENTION_DAYS: '90',
   BACKUP_RETENTION_DAYS: '30',
@@ -76,6 +99,7 @@ describe('parseServerEnvironment', () => {
     expect(environment.TRACKER_DRY_RUN).toBe(true);
     expect(environment.UPLOAD_MAX_BYTES).toBe(52_428_800);
     expect(environment.UPLOAD_STAGING_TTL_SECONDS).toBe(86_400);
+    expect(environment.UPLOAD_MAX_STAGED_BYTES_PER_USER).toBe(262_144_000);
     expect(environment.SESSION_TTL_SECONDS).toBe(3_600);
     expect(environment.DRAFT_TTL_SECONDS).toBe(2_592_000);
     expect(environment.SUBMISSION_RETENTION_DAYS).toBe(1_095);
@@ -141,6 +165,71 @@ describe('parseServerEnvironment', () => {
           UPLOAD_STORAGE_PATH: path,
         }),
       ).toThrow(ConfigurationError);
+    }
+  });
+
+  it('validates upload signing and ClamAV runtime boundaries', () => {
+    for (const override of [
+      { UPLOAD_SIGNING_SECRET: 'too-short' },
+      { UPLOAD_SIGNING_SECRET: 'upload signing secret with spaces and enough length' },
+      { CLAMAV_SOCKET_PATH: 'run/clamav/clamd.ctl' },
+      { CLAMAV_SOCKET_PATH: '/run/clamav/../private.sock' },
+      { CLAMAV_SCAN_TIMEOUT_MS: '999' },
+    ]) {
+      expect(() => parseServerEnvironment({ ...validEnvironment, ...override })).toThrow(
+        ConfigurationError,
+      );
+    }
+  });
+
+  it('keeps Tracker retry delays ordered', () => {
+    expect(() =>
+      parseServerEnvironment({
+        ...validEnvironment,
+        TRACKER_RETRY_BASE_MS: '5000',
+        TRACKER_RETRY_MAX_MS: '1000',
+      }),
+    ).toThrow(ConfigurationError);
+  });
+
+  it('requires a second explicit gate before Tracker production writes', () => {
+    expect(() =>
+      parseServerEnvironment({
+        ...validEnvironment,
+        TRACKER_DRY_RUN: 'false',
+        TRACKER_PRODUCTION_WRITES_APPROVED: 'false',
+      }),
+    ).toThrow(ConfigurationError);
+  });
+
+  it('requires an explicit assignee when Tracker writes are enabled', () => {
+    expect(() =>
+      parseServerEnvironment({
+        ...validEnvironment,
+        TRACKER_DRY_RUN: 'false',
+        TRACKER_PRODUCTION_WRITES_APPROVED: 'true',
+      }),
+    ).toThrow(ConfigurationError);
+
+    expect(
+      parseServerEnvironment({
+        ...validEnvironment,
+        TRACKER_ASSIGNEE: 'robot-craft72',
+        TRACKER_DRY_RUN: 'false',
+        TRACKER_PRODUCTION_WRITES_APPROVED: 'true',
+      }).TRACKER_ASSIGNEE,
+    ).toBe('robot-craft72');
+  });
+
+  it('keeps API and upload quotas internally consistent', () => {
+    for (const override of [
+      { API_IP_RATE_LIMIT_MAX: '119' },
+      { UPLOAD_MAX_STAGED_BYTES_PER_USER: '52428799' },
+      { UPLOAD_MAX_TOTAL_BYTES_PER_USER: '262143999' },
+    ]) {
+      expect(() => parseServerEnvironment({ ...validEnvironment, ...override })).toThrow(
+        ConfigurationError,
+      );
     }
   });
 

@@ -245,6 +245,7 @@ describe('Stage 3 API', () => {
       maxWebhookSecret: WEBHOOK_SECRET,
       consentVersion: leadPayload.consent.version,
       initDataMaxAgeSeconds: 3_600,
+      ipRateLimitMax: 1_000,
       contactMaxAgeSeconds: 300,
       publicBaseUrl: 'https://craft72app.ru',
       rateLimitMax: 100,

@@ -12,7 +12,6 @@ import { MockSubmissionApi } from './submission-api.js';
 import { MockUploadApi, type MockUploadStorage } from './upload-api.js';
 
 const NOW = new Date('2026-07-15T08:00:00.000Z');
-const SHA256 = 'a'.repeat(64);
 
 class MemoryUploadStorage implements MockUploadStorage {
   readonly #items = new Map<string, string>();
@@ -62,7 +61,6 @@ describe('mock upload and submission APIs', () => {
       fileName: 'brief.pdf',
       mimeType: 'application/pdf',
       sizeBytes: 12_345,
-      sha256: SHA256,
     } as const;
 
     const first = firstApi.initUpload(request);
@@ -74,14 +72,13 @@ describe('mock upload and submission APIs', () => {
 
     const completed = firstApi.completeUpload(first.uploadId, {
       sizeBytes: request.sizeBytes,
-      sha256: SHA256,
     });
     expect(UploadCompleteResponseSchema.safeParse(completed).success).toBe(true);
     expect(completed.document.id).toBe(first.uploadId);
+    expect(completed.document.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(
       firstApi.completeUpload(first.uploadId, {
         sizeBytes: request.sizeBytes,
-        sha256: request.sha256,
       }),
     ).toEqual(completed);
   });
@@ -94,9 +91,7 @@ describe('mock upload and submission APIs', () => {
       sizeBytes: 100,
     });
 
-    expect(() =>
-      api.completeUpload(initialized.uploadId, { sizeBytes: 99, sha256: SHA256 }),
-    ).toThrow(MockApiError);
+    expect(() => api.completeUpload(initialized.uploadId, { sizeBytes: 99 })).toThrow(MockApiError);
   });
 
   it('restores completed mock document metadata after a browser refresh', () => {
@@ -106,11 +101,9 @@ describe('mock upload and submission APIs', () => {
       fileName: 'brief.pdf',
       mimeType: 'application/pdf',
       sizeBytes: 100,
-      sha256: SHA256,
     });
     const completed = firstApi.completeUpload(initialized.uploadId, {
       sizeBytes: 100,
-      sha256: SHA256,
     });
 
     const restoredApi = new MockUploadApi({ now: () => NOW, storage });
@@ -123,11 +116,9 @@ describe('mock upload and submission APIs', () => {
       fileName: 'brief.pdf',
       mimeType: 'application/pdf',
       sizeBytes: 1_024,
-      sha256: SHA256,
     });
     const completed = uploads.completeUpload(initialized.uploadId, {
       sizeBytes: 1_024,
-      sha256: SHA256,
     });
     const session = new MockSessionState();
     session.setVerifiedContact({

@@ -1,6 +1,6 @@
 # Rollback
 
-Stage 4 forward migrations are expand-only. Application rollback changes the immutable release
+Stage 5–6 forward migrations are expand-only. Application rollback changes the immutable release
 pointer and only the named CRAFT72 API/worker processes; it intentionally leaves compatible forward
 migrations applied. Do not run a down migration as part of a routine application rollback.
 
@@ -44,6 +44,12 @@ Stage 3 release without the worker, it reloads only the API and removes only the
 the predecessor predates the API, it removes both named CRAFT72 processes. It does not modify the
 env, Nginx, database, backups or unrelated PM2 apps. The `rollback-stage3.sh` filename is retained
 for compatibility with existing immutable releases; its Stage 4 behavior is process-aware.
+
+A rollback to Stage 4 leaves the private upload directory and new tables intact but disables the
+new upload/scan routes and Tracker loop. Do not delete quarantine files, run the Stage 5/6 down SQL
+or flip Tracker write flags during an incident rollback. Record pending scan/outbox counts and return
+to a fixed Stage 5/6 release before accepting new file submissions. Because Stage 6 deploys with
+Tracker dry-run, routine rollback has no external Tracker objects to undo.
 
 ## Database restore (emergency only)
 

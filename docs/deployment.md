@@ -1,6 +1,6 @@
 # Deployment
 
-Stage 4 is deployed manually; the repository intentionally has no GitHub Actions workflow. The
+Stage 6 is deployed manually; the repository intentionally has no GitHub Actions workflow. The
 deployment unit contains the built Mini App, portable production API and worker packages, reviewed
 database migrations and process-management helpers. A release is immutable after it is placed
 under `/home/mun/apps/craft72-max-app/releases`.
@@ -15,7 +15,7 @@ Create the stable application directories:
 
 ```bash
 install -d -m 750 /home/mun/apps/craft72-max-app/{releases,shared}
-install -d -m 700 /home/mun/apps/craft72-max-app/shared/{backups/database,deploy-state,logs,retention}
+install -d -m 700 /home/mun/apps/craft72-max-app/shared/{backups/database,deploy-state,logs,retention,uploads}
 umask 077
 test -e /home/mun/apps/craft72-max-app/shared/.env || touch /home/mun/apps/craft72-max-app/shared/.env
 chmod 600 /home/mun/apps/craft72-max-app/shared/.env
@@ -25,13 +25,13 @@ Create a dedicated PostgreSQL database and login role. Enter the generated passw
 do not put it in shell history. Grant this role no access to unrelated databases. Put the resulting
 PostgreSQL URL only in `shared/.env` and keep the file owned by `mun` with mode `600`.
 
-The production env must include the Stage 3 runtime settings, the Stage 4 MAX worker settings from
-`.env.example`, and the following nonsecret build, retention and worker values:
+The protected production env must cover every key in `.env.example`. In addition to the existing
+MAX/database settings, Stage 5–6 uses these reviewed values (secrets remain unique server values):
 
 ```dotenv
 PUBLIC_BASE_URL=https://craft72app.ru
 PRIVACY_POLICY_URL=https://craft72app.ru/privacy.html
-CONSENT_VERSION=miniapp-2026-07-16
+CONSENT_VERSION=miniapp-2026-07-16-stage5
 API_HOST=127.0.0.1
 API_PORT=4100
 MAX_BOT_PUBLIC_NAME=<BOT_PUBLIC_NAME>
@@ -39,19 +39,85 @@ SUBMISSION_RETENTION_DAYS=1095
 LOG_RETENTION_DAYS=90
 BACKUP_RETENTION_DAYS=30
 RETENTION_CLEANUP_INTERVAL_SECONDS=21600
+API_RATE_LIMIT_MAX=120
+API_IP_RATE_LIMIT_MAX=1200
+API_RATE_LIMIT_WINDOW_SECONDS=60
 MAX_API_TIMEOUT_MS=10000
 BOT_WORKER_POLL_INTERVAL_MS=500
 BOT_WORKER_LEASE_SECONDS=60
 BOT_WORKER_MAX_ATTEMPTS=8
 BOT_RETRY_BASE_MS=1000
 BOT_RETRY_MAX_MS=300000
+UPLOAD_MAX_BYTES=52428800
+UPLOAD_STAGING_TTL_SECONDS=86400
+UPLOAD_STORAGE_PATH=/home/mun/apps/craft72-max-app/shared/uploads
+UPLOAD_DOWNLOAD_TTL_SECONDS=900
+UPLOAD_LEASE_SECONDS=900
+UPLOAD_MAX_ACTIVE_PER_USER=5
+UPLOAD_MAX_STAGED_BYTES_PER_USER=262144000
+UPLOAD_MAX_FILES_PER_USER=100
+UPLOAD_MAX_TOTAL_BYTES_PER_USER=1073741824
+CLAMAV_SOCKET_PATH=/run/clamav/clamd.ctl
+CLAMAV_SCAN_TIMEOUT_MS=120000
+FILE_SCAN_POLL_INTERVAL_MS=1000
+FILE_SCAN_LEASE_SECONDS=180
+FILE_SCAN_MAX_ATTEMPTS=8
+FILE_SCAN_RETRY_BASE_MS=5000
+FILE_SCAN_RETRY_MAX_MS=300000
+TRACKER_DRY_RUN=true
+TRACKER_PRODUCTION_WRITES_APPROVED=false
+TRACKER_ASSIGNEE=
+TRACKER_API_TIMEOUT_MS=10000
+TRACKER_WORKER_POLL_INTERVAL_MS=1000
+TRACKER_WORKER_LEASE_SECONDS=90
+TRACKER_WORKER_MAX_ATTEMPTS=8
+TRACKER_RETRY_BASE_MS=1000
+TRACKER_RETRY_MAX_MS=300000
 ```
 
-The same protected file contains `DATABASE_URL`, `MAX_BOT_TOKEN`, `MAX_WEBHOOK_SECRET` and other
-server-only values. Use a distinct random webhook secret accepted by the MAX subscription API.
-None of those values belong in `VITE_*`, a release archive, Git or deployment logs. Tracker
-credentials may be reserved in the file, but Stage 4 does not use them: Tracker discovery and
-synchronization are Stage 6.
+The same file contains `DATABASE_URL`, `MAX_BOT_TOKEN`, `MAX_WEBHOOK_SECRET`, `TRACKER_TOKEN`,
+`TRACKER_ORG_ID` and a random `UPLOAD_SIGNING_SECRET` of at least 32 URL-safe characters. None of
+those values belong in `VITE_*`, a release archive, Git or deployment logs. Keep mode `600`.
+
+### Install and verify ClamAV
+
+Install only the required antivirus packages; do not perform a broad package upgrade or reboot as
+part of application deployment:
+
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends clamav-daemon clamav-freshclam
+sudo sed -i -E \
+  -e 's/^LocalSocketGroup .*/LocalSocketGroup mun/' \
+  -e 's/^LocalSocketMode .*/LocalSocketMode 660/' \
+  -e 's/^StreamMaxLength .*/StreamMaxLength 60M/' \
+  -e 's/^MaxScanSize .*/MaxScanSize 100M/' \
+  -e 's/^MaxFileSize .*/MaxFileSize 60M/' \
+  -e 's/^MaxFiles .*/MaxFiles 10000/' \
+  -e 's/^EnableVersionCommand .*/EnableVersionCommand true/' \
+  /etc/clamav/clamd.conf
+grep -q '^AlertExceedsMax ' /etc/clamav/clamd.conf && \
+  sudo sed -i -E 's/^AlertExceedsMax .*/AlertExceedsMax yes/' /etc/clamav/clamd.conf || \
+  printf '%s\n' 'AlertExceedsMax yes' | sudo tee -a /etc/clamav/clamd.conf >/dev/null
+sudo freshclam
+sudo systemctl enable --now clamav-freshclam clamav-daemon
+sudo systemctl is-active --quiet clamav-daemon
+sudo systemctl is-active --quiet clamav-freshclam
+test -S /run/clamav/clamd.ctl
+clamconf -n | grep -E '^(LocalSocket|LocalSocketGroup|LocalSocketMode|StreamMaxLength|MaxScanSize|MaxFileSize|MaxFiles|AlertExceedsMax|EnableVersionCommand)'
+printf 'PING\n' | nc -U -w 5 /run/clamav/clamd.ctl | grep -Fx PONG
+```
+
+If `mun` cannot connect to the socket, review `LocalSocketGroup` and `LocalSocketMode` in the
+distribution's `clamd.conf`; grant only the minimum group permission and restart only
+`clamav-daemon`. Never make the upload directory public and never replace a failed scan with an
+automatic clean verdict. `/health/ready` reports `antivirus:error` and deployment fails closed while
+the daemon or its signatures are unavailable.
+
+If the official CDN returns 403, do not use an unofficial signature mirror or repeatedly bypass the
+cool-down. Provision an approved proxy/private mirror with Cisco's supported `cvdupdate` workflow,
+verify current official CVD files, and keep deployment blocked until both update service and daemon
+are healthy. See the [official private-mirror procedure](https://docs.clamav.net/appendix/CvdPrivateMirror.html).
 
 `MAX_BOT_PUBLIC_NAME` is the public MAX bot username returned by `GET /me`, not the Mini App URL or
 `PUBLIC_BASE_URL`. Keep it in the protected env with the rest of the validated runtime
@@ -141,9 +207,12 @@ snippet has no webhook proxy; if it remains active, the deployment's unauthentic
 will not return 401 and the guarded release switch will roll back. Confirm the rendered config
 contains `location = /webhooks/max` before running the deployment script.
 
-The include proxies the exact `/api/` and `/health/` prefixes and the exact
+The include proxies the exact `/api/`, `/files/` and `/health/` prefixes and the exact
 `POST /webhooks/max` endpoint to `127.0.0.1:4100`. Other `/webhooks/` paths return 404, and the MAX
-request body is capped at 256 KiB. It keeps the static release root, blocks release-internal
+request body is capped at 256 KiB. Upload bodies alone are capped at 50 MiB and streamed with proxy
+request buffering disabled; download response buffering and temporary files are also disabled, and
+temporary download capabilities are excluded from access logs. It keeps
+the static release root, blocks release-internal
 directories and permits the official MAX bridge script from `https://st.max.ru` in its CSP.
 `privacy.html`, `terms.html` and release markers are never cached, portfolio images have a bounded
 seven-day cache, and Vite's content-hashed assets are immutable.
@@ -180,7 +249,7 @@ The script performs the following guarded sequence:
    switch, and never runs a down migration during deployment;
 6. atomically changes only the `current` symlink and runs PM2 `startOrReload --only
 craft72-max-api,craft72-max-worker --update-env` without `pm2 save`;
-7. checks loopback API readiness and the worker PID, then the public API, exact public release marker
+7. checks database and ClamAV readiness plus the worker PID, then the public API, exact release marker
    and the protected webhook boundary. A failure restores the previous pointer and reloads or
    removes only the two CRAFT72 processes.
 
@@ -218,6 +287,16 @@ verify the shared contact and return only the signed-in user's submission. Exerc
 open-app route, a regular text inquiry and a duplicate webhook fixture; the duplicate must not
 create a second inquiry or outbound action.
 
+Upload one harmless file from an approved test account and verify the UI transitions through
+`pending/scanning` to `clean`; submit it and confirm it remains owner-scoped. Also try a mismatched
+extension/signature and a file over 50 MiB: both must be rejected without a document row usable by a
+submission. Do not use production customer files for acceptance.
+
+Tracker acceptance for this release is deliberately read-only. Confirm worker logs contain a
+deduplicated `tracker_dry_run_preview` with a payload hash after the approved test submission, while
+the corresponding outbox rows remain pending and no Tracker issue is created. Do not switch either
+production-write flag until an accessible test queue, assignee and taxonomy mapping are approved.
+
 The release deployment intentionally does not change the MAX control plane. Inspect the current
 subscription with the release helper:
 
@@ -229,5 +308,5 @@ Run its `register` action only during the explicitly approved Stage 8 production
 the HTTPS endpoint and both processes pass acceptance. Keep `unregister` for an approved incident or
 retirement procedure. The helper reads the protected env itself and does not print credentials.
 
-File upload/storage is not enabled until Stage 5. Tracker dry-run, queue mapping and delivery are not
-enabled until Stage 6.
+Stage 5 file storage is active. Stage 6 planning is active only in dry-run; external Tracker writes
+remain a separate production activation decision.

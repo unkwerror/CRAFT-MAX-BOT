@@ -14,7 +14,7 @@ import {
 } from '@craft72/contracts/source';
 
 import { MockApiError } from './errors.js';
-import { stableMockUuid } from './stable-identifiers.js';
+import { stableMockToken, stableMockUuid } from './stable-identifiers.js';
 
 const MOCK_UPLOAD_LIFETIME_MILLISECONDS = 15 * 60 * 1_000;
 export const MOCK_UPLOAD_STORAGE_KEY = 'craft72:max-miniapp:uploads:v1';
@@ -41,12 +41,14 @@ function validNow(clock: () => Date): Date {
 }
 
 function uploadFingerprint(request: UploadInitRequest): string {
-  return JSON.stringify([
-    request.fileName,
-    request.mimeType,
-    request.sizeBytes,
-    request.sha256 ?? null,
-  ]);
+  return JSON.stringify([request.fileName, request.mimeType, request.sizeBytes]);
+}
+
+function mockServerSha256(uploadId: string): string {
+  return [
+    stableMockToken(`upload-sha256-a:${uploadId}`),
+    stableMockToken(`upload-sha256-b:${uploadId}`),
+  ].join('');
 }
 
 export class MockUploadApi {
@@ -84,7 +86,10 @@ export class MockUploadApi {
       uploadId,
       uploadUrl: `https://uploads.mock.craft72.invalid/${uploadId}`,
       method: 'PUT',
-      headers: { 'content-type': request.mimeType },
+      headers: {
+        'Content-Type': request.mimeType,
+        'X-Craft72-Upload-Token': 'M'.repeat(43),
+      },
       expiresAt: new Date(now.getTime() + MOCK_UPLOAD_LIFETIME_MILLISECONDS).toISOString(),
       maxBytes: MAX_UPLOAD_BYTES,
     });
@@ -106,13 +111,9 @@ export class MockUploadApi {
       throw new MockApiError('CONFLICT', 'Completed upload size differs from initialized size');
     }
 
-    if (pending.sha256 !== undefined && pending.sha256 !== request.sha256) {
-      throw new MockApiError('CONFLICT', 'Completed upload hash differs from initialized hash');
-    }
-
     const existing = this.#documents.get(uploadId);
     if (existing !== undefined) {
-      if (existing.sizeBytes !== request.sizeBytes || existing.sha256 !== request.sha256) {
+      if (existing.sizeBytes !== request.sizeBytes) {
         throw new MockApiError('CONFLICT', 'Upload was already completed with different metadata');
       }
 
@@ -124,7 +125,7 @@ export class MockUploadApi {
       originalName: pending.fileName,
       mimeType: pending.mimeType,
       sizeBytes: request.sizeBytes,
-      sha256: request.sha256,
+      sha256: mockServerSha256(uploadId),
       scanStatus: 'clean',
       createdAt: validNow(this.#now).toISOString(),
     });

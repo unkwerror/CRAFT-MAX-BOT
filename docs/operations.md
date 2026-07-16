@@ -14,8 +14,8 @@ pm2 logs craft72-max-api --lines 100 --nostream
 pm2 logs craft72-max-worker --lines 100 --nostream
 ```
 
-Liveness proves that the HTTP process is running; readiness additionally proves its required
-dependencies. PM2 must report a nonzero online PID for the worker. Neither health endpoint may
+Liveness proves that the HTTP process is running; readiness additionally proves PostgreSQL and the
+ClamAV Unix-socket path. PM2 must report a nonzero online PID for the worker. Neither health endpoint may
 contain configuration or personal data. Application logging redacts authorization, cookies and
 request bodies; the worker records event/action identifiers and error classes, not webhook payloads
 or message text. Treat every log as confidential anyway: phone numbers, email addresses, form text,
@@ -25,6 +25,21 @@ A worker PID is necessary but does not prove functional readiness. Also check th
 counters stay stable, the worker remains online beyond `min_uptime`, and a controlled webhook test
 moves from inbox to a terminal outbox result. Use only an approved test chat when the production MAX
 subscription is active.
+
+For file service health, `health/ready` must contain both `database:ok` and `antivirus:ok`. Check the
+daemon and signature updater without exposing a customer file:
+
+```bash
+systemctl is-active clamav-daemon clamav-freshclam
+test -S /run/clamav/clamd.ctl
+clamconf -n | grep -E '^(LocalSocket|LocalSocketGroup|LocalSocketMode|StreamMaxLength|MaxScanSize|MaxFileSize|MaxFiles|AlertExceedsMax|EnableVersionCommand)'
+printf 'PING\n' | nc -U -w 5 /run/clamav/clamd.ctl | grep -Fx PONG
+find /var/lib/clamav -maxdepth 1 -type f \( -name '*.cvd' -o -name '*.cld' \) -mtime -2 -print -quit | grep -q .
+```
+
+An unavailable scanner or a daily-signature timestamp older than 48 hours is fail-closed: new files
+may enter quarantine but never become `clean`, and readiness returns 503. Restore the updater and
+daemon, then allow the leased scan queue to retry. Do not manually change scan verdicts.
 
 The PM2 ecosystem writes only this application's API and worker output to `shared/logs/api.log`,
 `shared/logs/api-error.log`, `shared/logs/worker.log` and `shared/logs/worker-error.log`. The supplied
@@ -120,8 +135,10 @@ Run the immutable release helper at least hourly from the `mun` crontab:
 ```
 
 The helper has its own non-blocking lock and uses `RETENTION_CLEANUP_INTERVAL_SECONDS` plus a
-last-success marker, so the frequent cron entry does not shorten the configured interval. Database
-deletion runs in one transaction and removes Stage 4 child data before eligible dialogs. It:
+last-success marker, so the frequent cron entry does not shorten the configured interval. Metadata
+deletion runs in one transaction. Physical file retention is owned by the API background cleanup so
+it removes the private file before its database pointer; the shell helper intentionally never builds
+filesystem paths from database or user input. Together they:
 
 - removes expired drafts and stale sessions;
 - removes only terminal (`completed` or `dead_letter`) MAX outbox actions at
@@ -131,7 +148,9 @@ deletion runs in one transaction and removes Stage 4 child data before eligible 
   `LOG_RETENTION_DAYS`, never above 90 days;
 - removes old dialog metadata that has no inquiry, outbox or webhook children;
 - never removes `pending`, `retry` or `processing` webhook/outbox work;
-- removes applications at `SUBMISSION_RETENTION_DAYS`, with dependent rows;
+- remove expired upload capabilities and unsubmitted files after the 24-hour staging window;
+- remove expired download grants and infected content without making it available;
+- remove applications and their physical files at `SUBMISSION_RETENTION_DAYS`, with dependent rows;
 - removes unreferenced MAX user rows and backup files at `BACKUP_RETENTION_DAYS`, never above 30 days.
 
 Test configuration and execute once after installation:
@@ -142,6 +161,29 @@ Test configuration and execute once after installation:
 
 An invalid or policy-exceeding setting makes cleanup fail closed. Alert on a missing recent
 `shared/retention/last-success.epoch`, database errors, a failed backup or readiness failures.
+
+## Yandex Tracker dry-run and outbox
+
+The expected Stage 6 production configuration is `TRACKER_DRY_RUN=true` and
+`TRACKER_PRODUCTION_WRITES_APPROVED=false` and an empty `TRACKER_ASSIGNEE`. In this mode the worker
+walks every eligible PART/CRM/DOCS operation, builds the exact payload and logs its nonsecret
+SHA-256; it does not claim a row, change a submission status or issue an HTTP request. Repeated
+identical previews are log-deduplicated.
+
+Inspect aggregate state without selecting payload or personal submission columns:
+
+```sql
+SELECT operation, status, count(*)
+  FROM integration_outbox
+ GROUP BY operation, status
+ ORDER BY operation, status;
+```
+
+`retry`, `dead_letter` or a stale `processing` row is unexpected while dry-run is active. After a
+future approved activation, alert on dead letters and inspect only IDs, operation, attempt count and
+sanitized error code. Never copy the JSON payload, OAuth token or form fields into incident logs.
+Production writes require a reviewed change setting both independent flags and are outside routine
+Stage 6 deployment.
 
 ## Release and backup retention
 

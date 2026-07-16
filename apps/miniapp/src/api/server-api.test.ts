@@ -1,11 +1,15 @@
 import {
   privacyConsentText,
   termsAcceptanceText,
+  type Document,
+  type DocumentDownloadLinkResponse,
   type LeadDraftUpsertResponse,
   type LeadFormData,
   type MaxAuthResponse,
   type MaxContactVerifyResponse,
   type SubmissionCreateResponse,
+  type UploadCompleteResponse,
+  type UploadInitResponse,
 } from '@craft72/contracts/source';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +19,8 @@ const TOKEN = 't'.repeat(43);
 const NOW = '2026-07-15T08:00:00.000Z';
 const LATER = '2026-07-15T09:00:00.000Z';
 const DRAFT_ID = '10000000-0000-4000-8000-000000000001';
+const UPLOAD_ID = '20000000-0000-4000-8000-000000000002';
+const SHA256 = 'a'.repeat(64);
 
 const AUTH_RESPONSE: MaxAuthResponse = {
   authenticated: true,
@@ -84,6 +90,35 @@ const SUBMISSION_RESPONSE: SubmissionCreateResponse = {
     submittedAt: NOW,
     updatedAt: NOW,
   },
+};
+
+const UPLOAD_INIT_RESPONSE: UploadInitResponse = {
+  uploadId: UPLOAD_ID,
+  uploadUrl: `https://craft72app.ru/api/uploads/${UPLOAD_ID}/content`,
+  method: 'PUT',
+  headers: {
+    'Content-Type': 'application/pdf',
+    'X-Craft72-Upload-Token': 'B'.repeat(43),
+  },
+  expiresAt: LATER,
+  maxBytes: 52_428_800,
+};
+
+const UPLOADED_DOCUMENT: Document = {
+  id: UPLOAD_ID,
+  originalName: 'brief.pdf',
+  mimeType: 'application/pdf',
+  sizeBytes: 10,
+  sha256: SHA256,
+  scanStatus: 'clean',
+  createdAt: NOW,
+};
+
+const UPLOAD_COMPLETE_RESPONSE: UploadCompleteResponse = { document: UPLOADED_DOCUMENT };
+
+const DOWNLOAD_LINK_RESPONSE: DocumentDownloadLinkResponse = {
+  downloadUrl: `https://craft72app.ru/files/${UPLOAD_ID}?grant=${UPLOAD_ID}&expires=1784103300&signature=${SHA256}`,
+  expiresAt: LATER,
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -258,6 +293,132 @@ describe('Stage3ApiClient', () => {
       expect(new Headers(requestInit(fetchMock, index).headers).get('authorization')).toBe(
         `Bearer ${TOKEN}`,
       );
+    }
+  });
+
+  it('uses authenticated upload metadata, completion, document, and signed-link endpoints', async () => {
+    const fetchMock = vi.fn<typeof globalThis.fetch>();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(AUTH_RESPONSE))
+      .mockResolvedValueOnce(jsonResponse(UPLOAD_INIT_RESPONSE))
+      .mockResolvedValueOnce(jsonResponse(UPLOAD_COMPLETE_RESPONSE))
+      .mockResolvedValueOnce(jsonResponse(UPLOAD_COMPLETE_RESPONSE))
+      .mockResolvedValueOnce(jsonResponse(DOWNLOAD_LINK_RESPONSE));
+    const client = new Stage3ApiClient({ fetch: fetchMock });
+    await client.authenticate('signed-init-data', 'privacy-v1');
+
+    const initRequest = {
+      fileName: 'brief.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 10,
+    } as const;
+    const completeRequest = { sizeBytes: 10 };
+
+    await expect(client.initUpload(initRequest)).resolves.toEqual(UPLOAD_INIT_RESPONSE);
+    await expect(client.completeUpload(UPLOAD_ID, completeRequest)).resolves.toEqual(
+      UPLOAD_COMPLETE_RESPONSE,
+    );
+    expect(client.getDocument(UPLOAD_ID)).toEqual(UPLOADED_DOCUMENT);
+    await expect(client.fetchDocument(UPLOAD_ID)).resolves.toEqual(UPLOAD_COMPLETE_RESPONSE);
+    await expect(client.createDownloadLink(UPLOAD_ID)).resolves.toEqual(DOWNLOAD_LINK_RESPONSE);
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      '/api/auth/max',
+      '/api/uploads/init',
+      `/api/uploads/${UPLOAD_ID}/complete`,
+      `/api/uploads/${UPLOAD_ID}`,
+      `/api/uploads/${UPLOAD_ID}/download-link`,
+    ]);
+    expect(requestBody(fetchMock, 1)).toEqual(initRequest);
+    expect(requestBody(fetchMock, 2)).toEqual(completeRequest);
+    expect(requestInit(fetchMock, 4).method).toBe('POST');
+    expect(requestInit(fetchMock, 4).body).toBeUndefined();
+    for (const index of [1, 2, 3, 4]) {
+      expect(new Headers(requestInit(fetchMock, index).headers).get('authorization')).toBe(
+        `Bearer ${TOKEN}`,
+      );
+    }
+  });
+
+  it('streams bytes to the signed upload URL without attaching the MAX session bearer', async () => {
+    type ProgressHandler = (event: ProgressEvent) => void;
+    const xhrState = {
+      abort: vi.fn(),
+      onabort: null as ProgressHandler | null,
+      onerror: null as ProgressHandler | null,
+      onload: null as ProgressHandler | null,
+      ontimeout: null as ProgressHandler | null,
+      open: vi.fn(),
+      send: vi.fn(),
+      setRequestHeader: vi.fn(),
+      status: 0,
+      timeout: 0,
+      upload: { onprogress: null as ProgressHandler | null },
+      withCredentials: true,
+    };
+    const progress = vi.fn();
+    const client = new Stage3ApiClient({
+      fetch: vi.fn<typeof globalThis.fetch>(),
+      xhr: () => xhrState as unknown as XMLHttpRequest,
+    });
+    const file = new File(['0123456789'], 'brief.pdf', { type: 'application/pdf' });
+
+    const transfer = client.uploadFile(UPLOAD_INIT_RESPONSE, file, { onProgress: progress });
+
+    expect(xhrState.open).toHaveBeenCalledWith('PUT', UPLOAD_INIT_RESPONSE.uploadUrl, true);
+    expect(xhrState.withCredentials).toBe(false);
+    expect(xhrState.setRequestHeader.mock.calls).toEqual([
+      ['Content-Type', 'application/pdf'],
+      ['X-Craft72-Upload-Token', 'B'.repeat(43)],
+    ]);
+    expect(xhrState.setRequestHeader).not.toHaveBeenCalledWith('authorization', expect.any(String));
+    expect(xhrState.send).toHaveBeenCalledWith(file);
+
+    xhrState.upload.onprogress?.({
+      lengthComputable: true,
+      loaded: 5,
+      total: 10,
+    } as ProgressEvent);
+    xhrState.status = 204;
+    xhrState.onload?.({} as ProgressEvent);
+
+    await expect(transfer).resolves.toBeUndefined();
+    expect(progress.mock.calls.map((call) => call[0]?.percent)).toEqual([0, 50, 100]);
+  });
+
+  it('rejects an upload URL containing credentials before opening a network request', async () => {
+    const xhr = vi.fn<() => XMLHttpRequest>();
+    const client = new Stage3ApiClient({ fetch: vi.fn<typeof globalThis.fetch>(), xhr });
+
+    await expect(
+      client.uploadFile(
+        {
+          ...UPLOAD_INIT_RESPONSE,
+          uploadUrl: `https://user:secret@craft72app.ru/api/uploads/${UPLOAD_ID}/content`,
+        },
+        new File(['0123456789'], 'brief.pdf', { type: 'application/pdf' }),
+      ),
+    ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+    expect(xhr).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cross-origin upload capability in the browser runtime', async () => {
+    vi.stubGlobal('location', { origin: 'https://craft72app.ru' });
+    const xhr = vi.fn<() => XMLHttpRequest>();
+    const client = new Stage3ApiClient({ fetch: vi.fn<typeof globalThis.fetch>(), xhr });
+    try {
+      await expect(
+        client.uploadFile(
+          {
+            ...UPLOAD_INIT_RESPONSE,
+            uploadUrl: `https://files.example.com/api/uploads/${UPLOAD_ID}/content`,
+          },
+          new File(['0123456789'], 'brief.pdf', { type: 'application/pdf' }),
+        ),
+      ).rejects.toMatchObject({ code: 'INVALID_RESPONSE' });
+      expect(xhr).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 

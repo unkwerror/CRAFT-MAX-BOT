@@ -93,6 +93,7 @@ export const serverEnvironmentSchema = z
       .max(86_400)
       .default(21_600),
     API_RATE_LIMIT_MAX: z.coerce.number().int().min(10).max(1_000).default(120),
+    API_IP_RATE_LIMIT_MAX: z.coerce.number().int().min(100).max(20_000).default(1_200),
     API_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3_600).default(60),
     DATABASE_URL: z
       .url()
@@ -114,10 +115,27 @@ export const serverEnvironmentSchema = z
     TRACKER_TOKEN: concreteString('TRACKER_TOKEN', 16),
     TRACKER_ORG_HEADER: z.enum(['X-Org-ID', 'X-Cloud-Org-ID']),
     TRACKER_ORG_ID: concreteString('TRACKER_ORG_ID'),
-    TRACKER_QUEUE_CRM: concreteString('TRACKER_QUEUE_CRM').default('CRM'),
-    TRACKER_QUEUE_PART: concreteString('TRACKER_QUEUE_PART').default('PART'),
-    TRACKER_QUEUE_DOCS: concreteString('TRACKER_QUEUE_DOCS').default('DOCS'),
+    TRACKER_QUEUE_CRM: z.literal('CRM').default('CRM'),
+    TRACKER_QUEUE_PART: z.literal('PART').default('PART'),
+    TRACKER_QUEUE_DOCS: z.literal('DOCS').default('DOCS'),
     TRACKER_DRY_RUN: booleanFromEnvironment.default(true),
+    TRACKER_PRODUCTION_WRITES_APPROVED: booleanFromEnvironment.default(false),
+    TRACKER_ASSIGNEE: z
+      .string()
+      .trim()
+      .max(128)
+      .refine(
+        (value) => !containsPlaceholder(value),
+        'TRACKER_ASSIGNEE must not contain a placeholder',
+      )
+      .refine((value) => !/[\r\n]/.test(value), 'TRACKER_ASSIGNEE must be a single line')
+      .default(''),
+    TRACKER_API_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(10_000),
+    TRACKER_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(250).max(30_000).default(1_000),
+    TRACKER_WORKER_LEASE_SECONDS: z.coerce.number().int().min(10).max(600).default(90),
+    TRACKER_WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(8),
+    TRACKER_RETRY_BASE_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
+    TRACKER_RETRY_MAX_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(300_000),
     UPLOAD_MAX_BYTES: z.coerce
       .number()
       .int()
@@ -135,6 +153,40 @@ export const serverEnvironmentSchema = z
         (value) => !value.split('/').some((segment) => segment === '..'),
         'UPLOAD_STORAGE_PATH must not contain parent-directory segments',
       ),
+    UPLOAD_SIGNING_SECRET: concreteString('UPLOAD_SIGNING_SECRET', 32)
+      .max(256)
+      .regex(
+        /^[A-Za-z0-9_-]+$/,
+        'UPLOAD_SIGNING_SECRET may contain only letters, digits, underscore and hyphen',
+      ),
+    UPLOAD_DOWNLOAD_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
+    UPLOAD_LEASE_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
+    UPLOAD_MAX_ACTIVE_PER_USER: z.coerce.number().int().min(1).max(100).default(5),
+    UPLOAD_MAX_STAGED_BYTES_PER_USER: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(10 * 1024 * 1024 * 1024)
+      .default(250 * 1024 * 1024),
+    UPLOAD_MAX_FILES_PER_USER: z.coerce.number().int().min(1).max(10_000).default(100),
+    UPLOAD_MAX_TOTAL_BYTES_PER_USER: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(100 * 1024 * 1024 * 1024)
+      .default(1024 * 1024 * 1024),
+    CLAMAV_SOCKET_PATH: concreteString('CLAMAV_SOCKET_PATH')
+      .refine((value) => value.startsWith('/'), 'CLAMAV_SOCKET_PATH must be an absolute path')
+      .refine(
+        (value) => !value.split('/').some((segment) => segment === '..'),
+        'CLAMAV_SOCKET_PATH must not contain parent-directory segments',
+      ),
+    CLAMAV_SCAN_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(180_000).default(120_000),
+    FILE_SCAN_POLL_INTERVAL_MS: z.coerce.number().int().min(250).max(30_000).default(1_000),
+    FILE_SCAN_LEASE_SECONDS: z.coerce.number().int().min(30).max(600).default(180),
+    FILE_SCAN_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(8),
+    FILE_SCAN_RETRY_BASE_MS: z.coerce.number().int().min(100).max(60_000).default(5_000),
+    FILE_SCAN_RETRY_MAX_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(300_000),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
     LOG_RETENTION_DAYS: z.coerce.number().int().min(1).max(90).default(90),
     BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(30).default(30),
@@ -146,6 +198,75 @@ export const serverEnvironmentSchema = z
         code: 'custom',
         message: 'BOT_RETRY_MAX_MS must be greater than or equal to BOT_RETRY_BASE_MS',
         path: ['BOT_RETRY_MAX_MS'],
+      });
+    }
+
+    if (environment.TRACKER_RETRY_MAX_MS < environment.TRACKER_RETRY_BASE_MS) {
+      context.addIssue({
+        code: 'custom',
+        message: 'TRACKER_RETRY_MAX_MS must be greater than or equal to TRACKER_RETRY_BASE_MS',
+        path: ['TRACKER_RETRY_MAX_MS'],
+      });
+    }
+
+    if (environment.FILE_SCAN_RETRY_MAX_MS < environment.FILE_SCAN_RETRY_BASE_MS) {
+      context.addIssue({
+        code: 'custom',
+        message: 'FILE_SCAN_RETRY_MAX_MS must be greater than or equal to FILE_SCAN_RETRY_BASE_MS',
+        path: ['FILE_SCAN_RETRY_MAX_MS'],
+      });
+    }
+
+    if (environment.API_IP_RATE_LIMIT_MAX < environment.API_RATE_LIMIT_MAX) {
+      context.addIssue({
+        code: 'custom',
+        message: 'API_IP_RATE_LIMIT_MAX must be greater than or equal to API_RATE_LIMIT_MAX',
+        path: ['API_IP_RATE_LIMIT_MAX'],
+      });
+    }
+
+    if (
+      environment.TRACKER_WORKER_LEASE_SECONDS * 1_000 <=
+      environment.TRACKER_API_TIMEOUT_MS * 3 + 5_000
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Tracker lease must exceed the longest idempotent API sequence',
+        path: ['TRACKER_WORKER_LEASE_SECONDS'],
+      });
+    }
+
+    if (environment.UPLOAD_MAX_STAGED_BYTES_PER_USER < environment.UPLOAD_MAX_BYTES) {
+      context.addIssue({
+        code: 'custom',
+        message: 'UPLOAD_MAX_STAGED_BYTES_PER_USER must allow at least one maximum-size upload',
+        path: ['UPLOAD_MAX_STAGED_BYTES_PER_USER'],
+      });
+    }
+
+    if (
+      environment.UPLOAD_MAX_TOTAL_BYTES_PER_USER < environment.UPLOAD_MAX_STAGED_BYTES_PER_USER
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'UPLOAD_MAX_TOTAL_BYTES_PER_USER must cover the staged-byte quota',
+        path: ['UPLOAD_MAX_TOTAL_BYTES_PER_USER'],
+      });
+    }
+
+    if (!environment.TRACKER_DRY_RUN && !environment.TRACKER_PRODUCTION_WRITES_APPROVED) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Tracker writes require explicit production approval',
+        path: ['TRACKER_PRODUCTION_WRITES_APPROVED'],
+      });
+    }
+
+    if (!environment.TRACKER_DRY_RUN && environment.TRACKER_ASSIGNEE.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Tracker production writes require an explicit assignee',
+        path: ['TRACKER_ASSIGNEE'],
       });
     }
 

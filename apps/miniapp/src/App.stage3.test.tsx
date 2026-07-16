@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MaxWebAppBridge } from './platform/types.js';
 
 const SESSION_TOKEN = 'A'.repeat(43);
+const UPLOAD_ID = '20000000-0000-4000-8000-000000000002';
+const SHA256 = 'a'.repeat(64);
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -45,6 +47,7 @@ afterEach(() => {
   delete window.WebApp;
   window.location.hash = '';
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.resetModules();
 });
@@ -154,6 +157,99 @@ describe('App Stage 3 runtime', () => {
       ),
     ).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('restores authenticated upload metadata and opens a short-lived download link', async () => {
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL', 'https://craft72.ru/privacy');
+    vi.stubEnv('VITE_CONSENT_VERSION', 'privacy-2026-07-16');
+    const webApp = installMaxBridge();
+    const draft = {
+      id: '10000000-0000-4000-8000-000000000001',
+      currentStep: 13,
+      payload: { documentIds: [UPLOAD_ID], description: 'Материалы проекта' },
+      source: null,
+      updatedAt: '2026-07-16T08:00:00.000Z',
+      expiresAt: '2026-08-15T08:00:00.000Z',
+    };
+    const document = {
+      id: UPLOAD_ID,
+      originalName: 'brief.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 1_024,
+      sha256: SHA256,
+      scanStatus: 'clean',
+      createdAt: '2026-07-16T08:00:00.000Z',
+    };
+    const downloadUrl = `https://craft72app.ru/files/${UPLOAD_ID}?grant=${UPLOAD_ID}&expires=1784103300&signature=${SHA256}`;
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url === '/api/auth/max') {
+        return jsonResponse({
+          authenticated: true,
+          user: {
+            id: '101',
+            firstName: 'Максим',
+            lastName: 'Иванов',
+            username: null,
+            languageCode: 'ru',
+            photoUrl: null,
+          },
+          session: {
+            token: SESSION_TOKEN,
+            expiresAt: '2026-07-16T11:00:00.000Z',
+            verifiedContact: null,
+          },
+          startParam: 'upload_brief',
+        });
+      }
+      if (url === '/api/leads/draft') return jsonResponse({ draft });
+      if (url === `/api/uploads/${UPLOAD_ID}`) return jsonResponse({ document });
+      if (url === `/api/uploads/${UPLOAD_ID}/download-link`) {
+        expect(init?.method).toBe('POST');
+        return jsonResponse({
+          downloadUrl,
+          expiresAt: '2026-07-16T08:15:00.000Z',
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { App } = await import('./App.js');
+    render(<App />);
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    await userEvent.click(checkboxes[0] as HTMLElement);
+    await userEvent.click(checkboxes[1] as HTMLElement);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+
+    expect(await screen.findByRole('heading', { name: 'Загрузка файлов' })).toBeTruthy();
+    expect(screen.getByText('brief.pdf')).toBeTruthy();
+    expect((screen.getByLabelText('Выбрать файлы') as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByText('Защищённая загрузка')).toBeTruthy();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          url === `/api/uploads/${UPLOAD_ID}` &&
+          new Headers(init?.headers).get('authorization') === `Bearer ${SESSION_TOKEN}`,
+      ),
+    ).toBe(true);
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => url === '/api/leads/draft' && init?.method === 'POST',
+        ),
+      ).toBe(true),
+    );
+    const savedDraftCall = fetchMock.mock.calls.find(
+      ([url, init]) => url === '/api/leads/draft' && init?.method === 'POST',
+    );
+    expect(JSON.parse(String(savedDraftCall?.[1]?.body))).toMatchObject({
+      payload: { documentIds: [UPLOAD_ID] },
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Скачать файл brief.pdf' }));
+    await waitFor(() => expect(webApp.openLink).toHaveBeenCalledWith(downloadUrl));
   });
 
   it('opens the configured MAX manager chat from the home screen', async () => {

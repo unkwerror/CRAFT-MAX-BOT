@@ -20,7 +20,8 @@ describeWithDatabase('PostgresStage3Store integration', () => {
     throw new Error('Repository integration tests require a database name ending in _test');
   }
 
-  const client = createDatabaseClient({ connectionString, max: 1 });
+  const client = createDatabaseClient({ connectionString, max: 2 });
+  let releaseIsolationLock: (() => Promise<void>) | null = null;
   let now = new Date('2026-07-15T10:00:00.000Z');
   const store = new PostgresStage3Store(client.db, {
     draftTtlSeconds: 60,
@@ -31,6 +32,12 @@ describeWithDatabase('PostgresStage3Store integration', () => {
   const version = 'miniapp-2026-07-15';
 
   beforeAll(async () => {
+    const isolationConnection = await client.pool.connect();
+    await isolationConnection.query('select pg_advisory_lock(724256)');
+    releaseIsolationLock = async () => {
+      await isolationConnection.query('select pg_advisory_unlock(724256)');
+      isolationConnection.release();
+    };
     await migrate(client.db, {
       migrationsFolder: fileURLToPath(
         new URL('../../../packages/database/drizzle', import.meta.url),
@@ -39,6 +46,9 @@ describeWithDatabase('PostgresStage3Store integration', () => {
   });
 
   afterAll(async () => {
+    if (releaseIsolationLock !== null) {
+      await releaseIsolationLock();
+    }
     await client.close();
   });
 

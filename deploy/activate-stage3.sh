@@ -115,7 +115,7 @@ rollback_on_error() {
 
   rm -f -- "${CURRENT_CANDIDATE}"
 
-  echo "Stage 4 activation failed; the previous application pointer was restored." >&2
+  echo "Stage 6 activation failed; the previous application pointer was restored." >&2
   exit "${status}"
 }
 trap rollback_on_error ERR

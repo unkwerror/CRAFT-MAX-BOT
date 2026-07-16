@@ -8,7 +8,7 @@ import type {
   Submission,
 } from '@craft72/contracts/source';
 
-import { Stage3ApiClient } from './api/index.js';
+import { Stage3ApiClient, Stage3ApiClientError } from './api/index.js';
 import { createEmptyDraft, toFinalLeadForm } from './brief/draft.js';
 import { InlineNotice } from './components/FormControls.js';
 import { AppTopbar, BottomNav, LoadingScreen, Page, Toast } from './components/Layout.js';
@@ -28,6 +28,7 @@ import {
 } from './navigation.js';
 import { maxBridge } from './platform/index.js';
 import { maxBotConfiguration } from './runtime/bot-config.js';
+import { getDocumentReadiness } from './runtime/document-readiness.js';
 import { privacyConfiguration } from './runtime/privacy-config.js';
 import { BRIEF_TOTAL_STEPS, BriefScreen, type BriefStep } from './screens/BriefScreen.js';
 import { CasesScreen } from './screens/CasesScreen.js';
@@ -83,8 +84,6 @@ const normalizeServerDraft = (draft: LeadDraftFormState): LeadDraftFormState => 
       draft.consent.accepted === true,
     version: privacyConfiguration.consentVersion,
   },
-  // Upload intents and private storage are Stage 5. Never submit browser mock document IDs.
-  documentIds: [],
 });
 
 const RuntimeUnavailableScreen = () => (
@@ -213,7 +212,25 @@ export const App = () => {
           { signal: controller.signal },
         );
         const response = await serverApi.getDraft({ signal: controller.signal });
+        const missingDocumentIds = new Set<string>();
+        if (response.draft !== null) {
+          await Promise.all(
+            [...new Set(response.draft.payload.documentIds ?? [])].map(async (documentId) => {
+              try {
+                await serverApi.fetchDocument(documentId, { signal: controller.signal });
+              } catch (error) {
+                if (
+                  error instanceof Stage3ApiClientError &&
+                  (error.code === 'NOT_FOUND' || error.code === 'UPLOAD_NOT_FOUND')
+                ) {
+                  missingDocumentIds.add(documentId);
+                }
+              }
+            }),
+          );
+        }
         if (!active) return;
+        if (!serverApi.hasSession()) throw new Error('The production session has expired');
 
         setServerVerifiedPhone(authenticated.session.verifiedContact?.phone ?? null);
         if (response.draft === null) {
@@ -222,7 +239,13 @@ export const App = () => {
           setBriefStep(1);
           setHasActiveDraft(false);
         } else {
-          const payload = normalizeServerDraft(response.draft.payload);
+          const normalizedPayload = normalizeServerDraft(response.draft.payload);
+          const payload = {
+            ...normalizedPayload,
+            documentIds: (normalizedPayload.documentIds ?? []).filter(
+              (documentId) => !missingDocumentIds.has(documentId),
+            ),
+          };
           setSavedDraft({ ...response.draft, payload });
           setDraft(payload);
           setBriefStep(asBriefStep(response.draft.currentStep));
@@ -515,21 +538,35 @@ export const App = () => {
     setHasActiveDraft(true);
   }, []);
 
+  const handleDocumentDownload = useCallback(
+    async (documentId: string): Promise<void> => {
+      try {
+        const response = await serverApi.createDownloadLink(documentId);
+        if (!maxBridge.openLink(response.downloadUrl)) {
+          setToast('Не удалось открыть ссылку на файл');
+        }
+      } catch {
+        setToast('Не удалось подготовить ссылку на файл');
+      }
+    },
+    [serverApi],
+  );
+
   const finalForm = useMemo(() => safeFinalForm(draft), [draft]);
   const phoneVerified =
     (shouldUseServer ? serverVerifiedPhone : session.verifiedContact?.phone) ===
     draft.contact?.phone;
   const documentNames = useMemo(() => {
-    if (shouldUseServer) return [];
+    const documentSource = shouldUseServer ? serverApi : uploadApi;
     return (draft.documentIds ?? []).flatMap((documentId) => {
       try {
-        const document = uploadApi.getDocument(documentId);
+        const document = documentSource.getDocument(documentId);
         return document === null ? [] : [document.originalName];
       } catch {
         return [];
       }
     });
-  }, [draft.documentIds, shouldUseServer, uploadApi]);
+  }, [draft.documentIds, serverApi, shouldUseServer, uploadApi]);
 
   const handleSubmit = useCallback(async (): Promise<void> => {
     const form = safeFinalForm(draft);
@@ -537,13 +574,19 @@ export const App = () => {
       setSubmitError('Проверьте обязательные поля брифа. Введённые данные сохранены.');
       return;
     }
-    if (shouldUseServer && form.documentIds.length > 0) {
-      setSubmitError(
-        'Удалите демонстрационные файлы из черновика. На этапе 3 можно отправить HTTPS-ссылку.',
+    if (shouldUseServer) {
+      const documentReadiness = getDocumentReadiness(form.documentIds, (documentId) =>
+        serverApi.getDocument(documentId),
       );
-      return;
+      if (documentReadiness === 'checking') {
+        setSubmitError('Дождитесь завершения проверки файлов и повторите отправку.');
+        return;
+      }
+      if (documentReadiness === 'rejected') {
+        setSubmitError('Удалите файлы, которые не прошли проверку безопасности.');
+        return;
+      }
     }
-
     setSubmitError(undefined);
     setIsSubmitting(true);
     await Promise.resolve();
@@ -642,10 +685,12 @@ export const App = () => {
       screen = (
         <UploadScreen
           description={draft.description ?? ''}
+          documentLookupAuthoritative={!shouldUseServer}
           documentIds={draft.documentIds ?? []}
-          fileUploadsEnabled={!shouldUseServer}
+          fileUploadsEnabled={!shouldUseServer || runtimeStatus === 'connected'}
           onBack={handleBack}
           onDocumentAdded={handleDocumentAdded}
+          {...(shouldUseServer ? { onDocumentDownload: handleDocumentDownload } : {})}
           onDocumentRemoved={handleDocumentRemoved}
           onDescriptionChange={(description) => updateDraft({ ...draft, description })}
           onDone={() => (hasActiveDraft ? navigate('brief') : openBrief())}
@@ -659,7 +704,8 @@ export const App = () => {
             })
           }
           onToast={setToast}
-          uploadApi={uploadApi}
+          serverBacked={shouldUseServer}
+          uploadApi={shouldUseServer ? serverApi : uploadApi}
           uploadLink={draft.links?.[0] ?? ''}
         />
       );
@@ -777,7 +823,7 @@ export const App = () => {
               : 'Web preview';
   const runtimeNotice =
     runtimeStatus === 'connected'
-      ? 'Этап 3 · MAX-аутентификация, проверенный контакт и серверный черновик подключены'
+      ? 'Этап 5 · MAX-сессия, серверный черновик и защищённое хранилище подключены'
       : runtimeStatus === 'awaiting-consent'
         ? 'До вашего согласия Mini App не отправляет MAX-профиль и данные на сервер'
         : maxBridge.isAvailable() && !privacyConfiguration.productionDataEnabled

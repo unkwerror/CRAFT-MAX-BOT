@@ -51,7 +51,7 @@ upload_archive="${DEPLOY_ROOT}/releases/.upload-${release_id}.tar.gz"
 upload_checksum="${upload_archive}.sha256"
 lock_dir="${DEPLOY_ROOT}/.deploy-lock"
 target="${DEPLOY_USER}@${DEPLOY_HOST}"
-build_root="$(mktemp -d /tmp/craft72-stage4-deploy.XXXXXXXX)"
+build_root="$(mktemp -d /tmp/craft72-stage6-deploy.XXXXXXXX)"
 payload_dir="${build_root}/payload"
 archive_file="${build_root}/${release_id}.tar.gz"
 checksum_file="${archive_file}.sha256"
@@ -140,7 +140,7 @@ if migration_violations="$(rg --line-number --ignore-case \
   "${REPOSITORY_ROOT}/packages/database/drizzle" \
   --glob '*.sql' --glob '!**/rollback/**')"; then
   printf '%s\n' "${migration_violations}" >&2
-  die "A forward migration contains a destructive statement. Stage 4 deploy accepts expand-only migrations."
+  die "A forward migration contains a destructive statement. Stage 6 deploy accepts expand-only migrations."
 else
   migration_scan_status=$?
   [[ "${migration_scan_status}" -eq 1 ]] || die "Forward migrations could not be inspected safely."
@@ -199,7 +199,7 @@ fi
 lock_acquired=true
 
 "${ssh_command[@]}" "test ! -e '${release_dir}' && test ! -e '${incoming_dir}'"
-echo "Uploading immutable Stage 4 release ${release_id}..."
+echo "Uploading immutable Stage 6 release ${release_id}..."
 "${scp_command[@]}" "${archive_file}" "${target}:${upload_archive}"
 "${scp_command[@]}" "${checksum_file}" "${target}:${upload_checksum}"
 

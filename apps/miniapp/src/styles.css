@@ -1413,6 +1413,35 @@ a {
   color: var(--app-error);
 }
 
+.file-row__progress {
+  display: block;
+  width: min(100%, 220px);
+  height: 4px;
+  margin-top: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  accent-color: var(--app-accent-brand);
+}
+
+.file-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.file-row__download,
+.file-row__retry {
+  min-height: 44px;
+  padding: 0 8px;
+  color: var(--app-accent-deep);
+  border: 0;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
 .file-row__remove {
   display: grid;
   width: 44px;
