@@ -578,30 +578,45 @@ export const App = () => {
   );
 
   const handleOpenManagerChat = useCallback((): void => {
-    // Prefer a direct manager dialog; fall back to the bot profile if user id is not set.
-    const managerLink = maxBotConfiguration.managerUrl ?? maxBotConfiguration.url;
-    if (managerLink === null) {
-      showToast(
-        'Чат с менеджером временно недоступен. Закройте приложение и напишите боту КРАФТ в MAX.',
-        'error',
-      );
-      return;
-    }
-
+    // 1) Phone (tel:) — preferred for direct call / handoff by number
+    // 2) MAX user deep-link
+    // 3) Bot profile as last resort
     try {
-      const opened = maxBridge.openMaxLink(managerLink);
-      if (!opened) {
+      if (maxBotConfiguration.managerPhone !== null) {
+        const dialed = maxBridge.openPhone(maxBotConfiguration.managerPhone);
+        if (dialed) {
+          maxBridge.close();
+          return;
+        }
+      }
+
+      const managerLink = maxBotConfiguration.managerUrl ?? maxBotConfiguration.url;
+      if (managerLink === null) {
         showToast(
-          'Не удалось открыть чат. Закройте Mini App и напишите менеджеру КРАФТ в MAX.',
+          maxBotConfiguration.managerPhone === null
+            ? 'Чат с менеджером временно недоступен. Закройте приложение и напишите боту КРАФТ в MAX.'
+            : `Не удалось открыть звонок. Позвоните менеджеру: ${maxBotConfiguration.managerPhone}`,
           'error',
         );
         return;
       }
-      // Prefer landing in the MAX dialog after opening the chat deep-link.
+
+      const opened = maxBridge.openMaxLink(managerLink);
+      if (!opened) {
+        showToast(
+          maxBotConfiguration.managerPhone === null
+            ? 'Не удалось открыть чат. Закройте Mini App и напишите менеджеру КРАФТ в MAX.'
+            : `Не удалось открыть чат. Позвоните: ${maxBotConfiguration.managerPhone}`,
+          'error',
+        );
+        return;
+      }
       maxBridge.close();
     } catch {
       showToast(
-        'Не удалось открыть чат. Закройте Mini App и напишите менеджеру КРАФТ в MAX.',
+        maxBotConfiguration.managerPhone === null
+          ? 'Не удалось открыть чат. Закройте Mini App и напишите менеджеру КРАФТ в MAX.'
+          : `Не удалось открыть чат. Позвоните: ${maxBotConfiguration.managerPhone}`,
         'error',
       );
     }

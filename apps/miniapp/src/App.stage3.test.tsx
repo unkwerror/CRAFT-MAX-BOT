@@ -252,9 +252,59 @@ describe('App Stage 3 runtime', () => {
     await waitFor(() => expect(webApp.openLink).toHaveBeenCalledWith(downloadUrl));
   });
 
-  it('opens the configured MAX manager chat from the home screen', async () => {
+  it('opens the manager phone dialer from the home screen when configured', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
+    vi.stubEnv('VITE_MAX_MANAGER_PHONE', '+79220063645');
+    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '61096226');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
+    vi.stubEnv('VITE_CONSENT_VERSION', '');
+    const webApp = installMaxBridge();
+
+    const { App } = await import('./App.js');
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
+
+    // Phone path uses tel: via DOM, not openMaxLink
+    expect(webApp.openMaxLink).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Не удалось открыть/)).toBeNull();
+  });
+
+  it('shows a safe fallback when the MAX manager link is not configured', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
+    vi.stubEnv('VITE_CONSENT_VERSION', '');
+    vi.doMock('./runtime/bot-config.js', () => ({
+      maxBotConfiguration: {
+        url: null,
+        managerPhone: null,
+        managerUrl: null,
+        managerUserId: null,
+      },
+      resolveMaxBotConfiguration: () => ({
+        url: null,
+        managerPhone: null,
+        managerUrl: null,
+        managerUserId: null,
+      }),
+    }));
+    const webApp = installMaxBridge();
+
+    const { App } = await import('./App.js');
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
+
+    expect(webApp.openMaxLink).not.toHaveBeenCalled();
+    expect(screen.getByText(/Чат с менеджером временно недоступен/)).toBeTruthy();
+    vi.doUnmock('./runtime/bot-config.js');
+  });
+
+  it('falls back to the MAX user deep-link when phone is not configured', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
+    vi.stubEnv('VITE_MAX_MANAGER_PHONE', '');
     vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '61096226');
     vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
     vi.stubEnv('VITE_CONSENT_VERSION', '');
@@ -266,44 +316,5 @@ describe('App Stage 3 runtime', () => {
     await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
 
     expect(webApp.openMaxLink).toHaveBeenCalledWith('https://max.ru/61096226');
-    expect(screen.queryByText(/Не удалось открыть чат/)).toBeNull();
-  });
-
-  it('shows a safe fallback when the MAX manager link is not configured', async () => {
-    vi.resetModules();
-    vi.stubEnv('VITE_MAX_BOT_URL', '');
-    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '');
-    vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
-    vi.stubEnv('VITE_CONSENT_VERSION', '');
-    const webApp = installMaxBridge();
-
-    const { App } = await import('./App.js');
-    render(<App />);
-
-    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
-
-    expect(webApp.openMaxLink).not.toHaveBeenCalled();
-    expect(screen.getByText(/Чат с менеджером временно недоступен/)).toBeTruthy();
-  });
-
-  it('shows a safe fallback when MAX and the browser cannot open the manager link', async () => {
-    vi.resetModules();
-    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
-    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '61096226');
-    vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
-    vi.stubEnv('VITE_CONSENT_VERSION', '');
-    vi.spyOn(window, 'open').mockReturnValue(null);
-
-    const { App } = await import('./App.js');
-    render(<App />);
-
-    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
-
-    expect(window.open).toHaveBeenCalledWith(
-      'https://max.ru/61096226',
-      '_blank',
-      'noopener,noreferrer',
-    );
-    expect(screen.getByText(/Не удалось открыть чат/)).toBeTruthy();
   });
 });

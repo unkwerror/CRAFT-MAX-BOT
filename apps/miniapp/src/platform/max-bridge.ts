@@ -408,6 +408,46 @@ class MaxBridgeAdapterImpl implements MaxBridgeAdapter {
     return this.open(normalizeUrl(value, true), 'openMaxLink');
   }
 
+  openPhone(phoneE164: string): boolean {
+    const phone = phoneE164.trim();
+    if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+      throw new TypeError('Expected an E.164 phone number');
+    }
+    const href = `tel:${phone}`;
+    try {
+      const doc = this.host?.document;
+      if (doc !== undefined) {
+        const anchor = doc.createElement('a');
+        anchor.setAttribute('href', href);
+        anchor.setAttribute('rel', 'noopener noreferrer');
+        anchor.style.display = 'none';
+        doc.body?.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        return true;
+      }
+    } catch {
+      // Fall through to location / window.open.
+    }
+    try {
+      if (this.host?.location !== undefined) {
+        this.host.location.href = href;
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      if (typeof this.host?.open === 'function') {
+        const opened = this.host.open(href, '_self');
+        return opened !== null;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
   close(): void {
     try {
       const webApp = this.getWebApp() as (MaxWebAppBridge & { close?: () => void }) | undefined;

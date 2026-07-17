@@ -8,6 +8,7 @@ describe('MAX bot runtime configuration', () => {
       url: 'https://max.ru/craft72_bot',
       managerUrl: null,
       managerUserId: null,
+      managerPhone: null,
     });
   });
 
@@ -21,7 +22,22 @@ describe('MAX bot runtime configuration', () => {
       url: 'https://max.ru/se13560957_bot',
       managerUserId: '61096226',
       managerUrl: 'https://max.ru/61096226',
+      managerPhone: null,
     });
+  });
+
+  it('accepts a manager phone in E.164 and normalizes 8… local form', () => {
+    expect(
+      resolveMaxBotConfiguration({
+        VITE_MAX_BOT_URL: 'https://max.ru/se13560957_bot',
+        VITE_MAX_MANAGER_PHONE: '+79220063645',
+      }).managerPhone,
+    ).toBe('+79220063645');
+    expect(
+      resolveMaxBotConfiguration({
+        VITE_MAX_MANAGER_PHONE: '8 (922) 006-36-45',
+      }).managerPhone,
+    ).toBe('+79220063645');
   });
 
   it('keeps the manager link disabled when the setting is absent', () => {
@@ -29,6 +45,7 @@ describe('MAX bot runtime configuration', () => {
       url: null,
       managerUrl: null,
       managerUserId: null,
+      managerPhone: null,
     });
   });
 
@@ -46,6 +63,7 @@ describe('MAX bot runtime configuration', () => {
       url: null,
       managerUrl: null,
       managerUserId: null,
+      managerPhone: null,
     });
   });
 
@@ -61,7 +79,15 @@ describe('MAX bot runtime configuration', () => {
         url: 'https://max.ru/se13560957_bot',
         managerUrl: null,
         managerUserId: null,
+        managerPhone: null,
       });
+    },
+  );
+
+  it.each(['123', '++7922', 'not-a-phone', '79220063645x'])(
+    'rejects an unsafe manager phone: %s',
+    (value) => {
+      expect(resolveMaxBotConfiguration({ VITE_MAX_MANAGER_PHONE: value }).managerPhone).toBeNull();
     },
   );
 });
