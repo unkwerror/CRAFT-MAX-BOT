@@ -30,12 +30,26 @@ describe('planBotActions', () => {
       type: 'inline_keyboard',
       payload: {
         buttons: [
-          [{ type: 'open_app', text: 'Начать проект', web_app: WEB_APP, payload: 'new_project' }],
+          [
+            {
+              type: 'open_app',
+              text: 'Заполнить анкету',
+              web_app: WEB_APP,
+              payload: 'new_project',
+            },
+          ],
           [
             { type: 'open_app', text: 'Подобрать услугу', web_app: WEB_APP, payload: 'services' },
             { type: 'open_app', text: 'Проекты', web_app: WEB_APP, payload: 'portfolio' },
           ],
-          [{ type: 'open_app', text: 'Отправить ТЗ', web_app: WEB_APP, payload: 'upload_brief' }],
+          [
+            {
+              type: 'open_app',
+              text: 'Отправить материалы',
+              web_app: WEB_APP,
+              payload: 'upload_brief',
+            },
+          ],
           [{ type: 'message', text: 'Связаться с менеджером' }],
         ],
       },
@@ -59,8 +73,20 @@ describe('planBotActions', () => {
     expect(startedSend).toMatchObject({
       chatId: '182182182',
       kind: 'send_message',
-      body: { text: expect.stringContaining('Здравствуйте! Это КРАФТ') },
+      body: {
+        text: expect.stringMatching(/Здравствуйте! Это КРАФТ[\s\S]*мини-приложени/i),
+      },
     });
+  });
+
+  it('answers manager contact with a dedicated handoff message', () => {
+    const actions = planBotActions(message('Связаться с менеджером'), { webApp: WEB_APP });
+    const send = actions.find(({ kind }) => kind === 'send_message');
+    expect(send).toMatchObject({
+      kind: 'send_message',
+      body: { text: expect.stringContaining('менеджер КРАФТ получит обращение') },
+    });
+    expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(true);
   });
 
   it('stores free text and creates deterministic routing actions', () => {
@@ -128,7 +154,7 @@ describe('planBotActions', () => {
 
     expect(actions.map(({ kind }) => kind)).toEqual(['set_dialog_state', 'answer_callback']);
     expect(actions[1]).toMatchObject({
-      body: { message: { text: 'Откройте нужный раздел CRAFT72:' } },
+      body: { message: { text: 'Откройте нужный раздел мини-приложения КРАФТ:' } },
       callbackId: 'callback-id',
       kind: 'answer_callback',
     });

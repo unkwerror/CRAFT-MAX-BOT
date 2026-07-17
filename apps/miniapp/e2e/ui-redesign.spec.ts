@@ -11,11 +11,11 @@ const colorSchemes = ['light', 'dark'] as const;
 async function openHome(page: Page): Promise<void> {
   await page.route('https://st.max.ru/**', (route) => route.abort());
   await page.goto('http://127.0.0.1:4173/');
-  await expect(page.getByRole('heading', { name: /Проект начинается/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Расскажите о проекте/ })).toBeVisible();
 }
 
 async function measureLayout(page: Page, viewportWidth: number) {
-  const primary = page.getByRole('button', { name: 'Начать бриф' });
+  const primary = page.getByRole('button', { name: 'Заполнить анкету' });
   const secondary = page.getByRole('button', { exact: true, name: 'Смотреть проекты' });
   const [primaryBox, secondaryBox] = await Promise.all([
     primary.boundingBox(),

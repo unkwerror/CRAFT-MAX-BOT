@@ -102,7 +102,7 @@ export const BRIEF_STEP_META: Readonly<Record<BriefStep, BriefStepMeta>> = {
       'Подтвердите согласие на обработку данных этой заявки — это нужно для отправки, а не повторное принятие условий сервиса.',
   },
   17: {
-    title: 'Бриф заполнен',
+    title: 'Анкета заполнена',
     subtitle: 'Все разделы заполнены. Осталось открыть итоговое резюме и отправить заявку.',
   },
 };
@@ -539,7 +539,7 @@ const BriefStepFields = ({
         <>
           <ToggleRow
             checked={draft.consent?.accepted === true}
-            description="Для сохранения и рассмотрения брифа, связи со мной и подготовки предложения. Срок хранения заявки — до 3 лет; согласие можно отозвать через manager@craft72.ru. Без согласия отправка через Mini App невозможна."
+            description="Для сохранения и рассмотрения заявки, связи со мной и подготовки предложения. Срок хранения заявки — до 3 лет; согласие можно отозвать через manager@craft72.ru. Без согласия отправка через Mini App невозможна."
             label="Даю согласие ООО «Крафт Групп» на обработку данных заявки"
             onChange={(event) =>
               update({
@@ -692,7 +692,7 @@ export const BriefScreen = ({
       <ScreenHeader
         eyebrow={`Шаг ${String(step)} из ${String(BRIEF_TOTAL_STEPS)}`}
         onBack={onBack}
-        subtitle="Структурированный бриф проекта"
+        subtitle="Анкета по проекту"
         title="Новый проект"
       />
       {statusLine === null ? null : (

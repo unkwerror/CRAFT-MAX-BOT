@@ -57,12 +57,13 @@ export const CaseCard = ({ item, onDiscuss, onOpen, selected = false }: CaseCard
             Страница проекта ↗
           </button>
           <Button
+            className={selected ? 'case-card__cta case-card__cta--selected' : 'case-card__cta'}
             mode={selected ? 'secondary' : 'primary'}
             onClick={() => onDiscuss(item)}
             size="small"
             type="button"
           >
-            {selected ? 'Убрать из брифа' : 'Обсудить похожий'}
+            {selected ? 'Убрать из анкеты' : 'Обсудить похожий'}
           </Button>
         </div>
       </div>

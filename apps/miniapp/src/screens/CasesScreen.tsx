@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { CaseCatalogItem, CaseId } from '@craft72/contracts/source';
 
 import { CaseCard } from '../components/CaseCard.js';
+import { FilterSelect } from '../components/FilterSelect.js';
 import { InlineNotice } from '../components/FormControls.js';
 import { Icon } from '../components/Icon.js';
 import { Page, ScreenHeader } from '../components/Layout.js';
@@ -35,27 +36,6 @@ const EMPTY_FILTERS: CaseFilters = {
   scale: '',
   constructionKind: '',
 };
-
-interface FilterSelectProps {
-  readonly label: string;
-  readonly onChange: (value: string) => void;
-  readonly options: readonly { readonly label: string; readonly value: string }[];
-  readonly value: string;
-}
-
-const FilterSelect = ({ label, onChange, options, value }: FilterSelectProps) => (
-  <label className="filter-control">
-    <span>{label}</span>
-    <select onChange={(event) => onChange(event.currentTarget.value)} value={value}>
-      <option value="">Все</option>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  </label>
-);
 
 export interface CasesScreenProps {
   readonly bridge?: Pick<MaxBridgeAdapter, 'openLink'>;

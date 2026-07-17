@@ -130,7 +130,7 @@ export const validateBriefStep = (step: number, draft: LeadDraftFormState): Brie
         return { form: 'Проверьте заполненные разделы заявки' };
       }
     default:
-      return { step: 'Неизвестный шаг брифа' };
+      return { step: 'Неизвестный шаг анкеты' };
   }
 };
 

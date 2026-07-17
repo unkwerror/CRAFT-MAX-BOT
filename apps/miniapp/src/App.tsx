@@ -554,7 +554,7 @@ export const App = () => {
       ];
       updateDraft({ ...draft, services });
       // Soft-add: toast only — user navigates to brief via bottom nav when ready
-      showToast('Направления добавлены в бриф', 'success');
+      showToast('Направления сохранены в анкете', 'success');
     },
     [draft, showToast, updateDraft],
   );
@@ -566,29 +566,42 @@ export const App = () => {
           ...draft,
           selectedCaseIds: draft.selectedCaseIds.filter((caseId) => caseId !== item.id),
         });
-        showToast('Проект убран из брифа', 'success');
+        showToast('Проект убран из анкеты', 'success');
         return;
       }
       const selectedCaseIds = [...new Set([...(draft.selectedCaseIds ?? []), item.id])];
       updateDraft({ ...draft, selectedCaseIds });
       // Soft-add: toast only — do not openBrief()
-      showToast('Проект добавлен в бриф', 'success');
+      showToast('Проект добавлен в анкету', 'success');
     },
     [draft, showToast, updateDraft],
   );
 
   const handleOpenManagerChat = useCallback((): void => {
     if (maxBotConfiguration.url === null) {
-      showToast('Чат с менеджером временно недоступен', 'error');
+      showToast(
+        'Чат с менеджером временно недоступен. Закройте приложение и напишите боту КРАФТ в MAX.',
+        'error',
+      );
       return;
     }
 
     try {
-      if (!maxBridge.openMaxLink(maxBotConfiguration.url)) {
-        showToast('Не удалось открыть чат с менеджером', 'error');
+      const opened = maxBridge.openMaxLink(maxBotConfiguration.url);
+      if (!opened) {
+        showToast(
+          'Не удалось открыть чат. Закройте Mini App и напишите боту КРАФТ в MAX.',
+          'error',
+        );
+        return;
       }
+      // Prefer landing in the bot dialog after opening the chat deep-link.
+      maxBridge.close();
     } catch {
-      showToast('Не удалось открыть чат с менеджером', 'error');
+      showToast(
+        'Не удалось открыть чат. Закройте Mini App и напишите боту КРАФТ в MAX.',
+        'error',
+      );
     }
   }, [showToast]);
 
@@ -651,7 +664,7 @@ export const App = () => {
   const handleSubmit = useCallback(async (): Promise<void> => {
     const form = safeFinalForm(draft);
     if (form === null) {
-      setSubmitError('Проверьте обязательные поля брифа. Введённые данные сохранены.');
+      setSubmitError('Проверьте обязательные поля анкеты. Введённые данные сохранены.');
       return;
     }
     if (shouldUseServer) {

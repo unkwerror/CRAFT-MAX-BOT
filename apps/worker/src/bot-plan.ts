@@ -54,12 +54,18 @@ export interface BotPlanOptions {
 }
 
 const WELCOME_TEXT =
-  'Здравствуйте! Это КРАФТ — архитектурно-проектная команда. В Mini App можно подобрать услугу, посмотреть проекты или отправить ТЗ.';
+  'Здравствуйте! Это КРАФТ — архитектурно-проектная команда.\n\n' +
+  'Чтобы оставить заявку, посмотреть проекты или отправить материалы, откройте мини-приложение кнопкой ниже.\n\n' +
+  'Если удобнее написать здесь — кратко опишите задачу, и менеджер получит сообщение.';
 const ROUTING_TEXT =
-  'Спасибо, сообщение принято. Чтобы быстрее передать задачу команде, выберите подходящий раздел.';
-const CALLBACK_TEXT = 'Откройте нужный раздел CRAFT72:';
+  'Спасибо, сообщение принято. Чтобы ускорить работу, откройте нужный раздел мини-приложения кнопками ниже — или дождитесь ответа менеджера.';
+const CALLBACK_TEXT = 'Откройте нужный раздел мини-приложения КРАФТ:';
 const TEXT_REQUIRED_TEXT =
-  'Сейчас бот сохраняет только текстовые обращения. Опишите задачу сообщением или откройте нужный раздел Mini App.';
+  'Сейчас бот сохраняет только текстовые обращения. Опишите задачу сообщением или откройте мини-приложение кнопками ниже.';
+const MANAGER_CONTACT_PHRASE = 'Связаться с менеджером';
+const MANAGER_HANDOFF_TEXT =
+  'Напишите задачу одним сообщением — менеджер КРАФТ получит обращение. ' +
+  'Или откройте мини-приложение, чтобы заполнить анкету и приложить материалы.';
 const START_COMMAND_PATTERN = /^\/start(?:@[A-Za-z0-9_]+)?(?:\s|$)/i;
 const WELCOME_DEDUPLICATION_WINDOW_MS = 5 * 60 * 1_000;
 
@@ -86,13 +92,13 @@ export function createOpenAppKeyboard(webAppInput: string): MaxInlineKeyboardAtt
     type: 'inline_keyboard',
     payload: {
       buttons: [
-        [openAppButton('Начать проект', webApp, 'new_project')],
+        [openAppButton('Заполнить анкету', webApp, 'new_project')],
         [
           openAppButton('Подобрать услугу', webApp, 'services'),
           openAppButton('Проекты', webApp, 'portfolio'),
         ],
-        [openAppButton('Отправить ТЗ', webApp, 'upload_brief')],
-        [{ text: 'Связаться с менеджером', type: 'message' }],
+        [openAppButton('Отправить материалы', webApp, 'upload_brief')],
+        [{ text: MANAGER_CONTACT_PHRASE, type: 'message' }],
       ],
     },
   };
@@ -199,6 +205,10 @@ export function planBotActions(
     ]);
   }
 
+  const isManagerContact = text.localeCompare(MANAGER_CONTACT_PHRASE, 'ru', {
+    sensitivity: 'accent',
+  }) === 0;
+
   const inquiry: BotSaveInquiryAction | null =
     update.chatId !== null && update.actorUserId !== null && update.messageId !== null
       ? {
@@ -215,6 +225,10 @@ export function planBotActions(
   return compact([
     dialogAction(update, true),
     inquiry,
-    sendAction(update, messageBody(ROUTING_TEXT, webApp), 'route_message'),
+    sendAction(
+      update,
+      messageBody(isManagerContact ? MANAGER_HANDOFF_TEXT : ROUTING_TEXT, webApp),
+      isManagerContact ? 'manager_handoff' : 'route_message',
+    ),
   ]);
 }

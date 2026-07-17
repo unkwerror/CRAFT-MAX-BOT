@@ -1,9 +1,15 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { CasesScreen } from './CasesScreen.js';
 
 afterEach(cleanup);
+
+const chooseFilter = (label: string, optionName: string): void => {
+  fireEvent.click(screen.getByLabelText(label));
+  const listbox = screen.getByRole('listbox', { name: label });
+  fireEvent.click(within(listbox).getByRole('option', { name: optionName }));
+};
 
 describe('CasesScreen', () => {
   it('filters the local catalog and delegates project actions', () => {
@@ -13,15 +19,9 @@ describe('CasesScreen', () => {
     render(<CasesScreen bridge={bridge} onBack={vi.fn()} onDiscuss={onDiscuss} />);
 
     expect(screen.getAllByRole('article')).toHaveLength(8);
-    fireEvent.change(screen.getByLabelText('Тип объекта'), {
-      target: { value: 'public-building' },
-    });
-    fireEvent.change(screen.getByLabelText('Услуга'), {
-      target: { value: 'restoration' },
-    });
-    fireEvent.change(screen.getByLabelText('Город'), {
-      target: { value: 'Тобольск' },
-    });
+    chooseFilter('Тип объекта', 'Общественное здание');
+    chooseFilter('Услуга', 'Реконструкция и ОКН');
+    chooseFilter('Город', 'Тобольск');
 
     expect(screen.getAllByRole('article')).toHaveLength(1);
     expect(
@@ -51,7 +51,7 @@ describe('CasesScreen', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Убрать из брифа' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Убрать из анкеты' })).toBeTruthy();
     const projectLink = screen.getAllByRole('button', { name: 'Страница проекта ↗' }).at(0);
     if (projectLink === undefined) {
       throw new Error('Expected a project link');

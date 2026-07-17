@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 async function openApp(page: Page): Promise<void> {
   await page.route('https://st.max.ru/**', (route) => route.abort());
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /Проект начинается/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Расскажите о проекте/ })).toBeVisible();
 }
 
 async function continueBrief(page: Page): Promise<void> {
@@ -40,7 +40,7 @@ test('home and service finder stay inside the viewport', async ({ page }) => {
 
 test('an unfinished raw step survives refresh', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Начать бриф' }).click();
+  await page.getByRole('button', { name: 'Заполнить анкету' }).click();
   await page.getByRole('button', { name: /Девелопер/ }).click();
   await continueBrief(page);
 
@@ -72,7 +72,7 @@ test('mock upload metadata survives refresh', async ({ page }) => {
 
 test('a complete mock brief produces one stable submission', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: 'Начать бриф' }).click();
+  await page.getByRole('button', { name: 'Заполнить анкету' }).click();
 
   await page.getByRole('button', { name: /Девелопер/ }).click();
   await continueBrief(page);

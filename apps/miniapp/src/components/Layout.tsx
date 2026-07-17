@@ -7,9 +7,9 @@ import { Icon, type IconName } from './Icon.js';
 
 const NAV_ITEMS: readonly { icon: IconName; label: string; route: AppRoute }[] = [
   { icon: 'home', label: 'Главная', route: 'home' },
-  { icon: 'brief', label: 'Бриф', route: 'brief' },
+  { icon: 'brief', label: 'Анкета', route: 'brief' },
   { icon: 'projects', label: 'Проекты', route: 'cases' },
-  { icon: 'upload', label: 'Материалы', route: 'upload' },
+  { icon: 'upload', label: 'Файлы', route: 'upload' },
 ];
 
 export type StatusTone = 'ok' | 'warn' | 'error' | 'neutral';

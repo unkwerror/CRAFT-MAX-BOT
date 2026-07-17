@@ -274,7 +274,7 @@ describe('App Stage 3 runtime', () => {
     await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
 
     expect(webApp.openMaxLink).not.toHaveBeenCalled();
-    expect(screen.getByText('Чат с менеджером временно недоступен')).toBeTruthy();
+    expect(screen.getByText(/Чат с менеджером временно недоступен/)).toBeTruthy();
   });
 
   it('shows a safe fallback when MAX and the browser cannot open the manager link', async () => {
@@ -291,6 +291,6 @@ describe('App Stage 3 runtime', () => {
       '_blank',
       'noopener,noreferrer',
     );
-    expect(screen.getByText('Не удалось открыть чат с менеджером')).toBeTruthy();
+    expect(screen.getByText(/Не удалось открыть чат/)).toBeTruthy();
   });
 });

@@ -13,33 +13,43 @@ interface HomeAction {
 
 const actions: readonly HomeAction[] = [
   {
-    description: 'Структурированный бриф с сохранением прогресса',
+    description: 'Ответьте на вопросы — прогресс сохранится',
     icon: 'brief',
-    label: 'Обсудить новый проект',
+    label: 'Заполнить анкету',
     route: 'brief',
   },
   {
-    description: 'Короткая диагностика задачи',
+    description: 'Короткая подсказка, какая услуга подойдёт',
     icon: 'compass',
     label: 'Подобрать услугу',
     route: 'finder',
   },
   {
-    description: 'Релевантный опыт бюро',
+    description: 'Примеры реализованных объектов',
     icon: 'projects',
     label: 'Посмотреть проекты',
     route: 'cases',
   },
   {
-    description: 'Файлы и ссылки на материалы',
+    description: 'Файлы, ссылки и материалы к задаче',
     icon: 'upload',
-    label: 'Отправить ТЗ',
+    label: 'Отправить материалы',
     route: 'upload',
   },
+];
+
+const howItWorks: readonly { readonly title: string; readonly text: string }[] = [
   {
-    description: 'Открыть диалог с командой',
-    icon: 'chat',
-    label: 'Связаться с менеджером',
+    title: 'Расскажите о задаче',
+    text: 'Короткая анкета: объект, цель и контакты.',
+  },
+  {
+    title: 'При желании добавьте материалы',
+    text: 'Проекты, файлы ТЗ или ссылки — не обязательно сразу.',
+  },
+  {
+    title: 'Менеджер свяжется с вами',
+    text: 'Ответ придёт в MAX — обычно в ближайшее время.',
   },
 ];
 
@@ -57,20 +67,19 @@ export const HomeScreen = ({
   onSupport,
 }: HomeScreenProps) => (
   <Page>
-    <div className="home-layout">
-      <section className="hero">
+    <div className="home-layout home-layout--friendly">
+      <section className="hero hero--friendly">
         <div className="hero__content">
-          <span className="hero__eyebrow">
-            <b>01</b>
-            Архитектура · инженерия · развитие
+          <span className="hero__eyebrow hero__eyebrow--soft">
+            <b>КРАФТ</b>
+            Архитектура и проектирование
           </span>
           <h1>
-            Проект <span className="hero__line">начинается с</span>
-            <em>точного вопроса</em>
+            Расскажите о проекте —
+            <em> мы подскажем, с чего начать</em>
           </h1>
           <p>
-            Соберём исходные данные, определим состав работ и передадим задачу профильной команде
-            КРАФТ.
+            Заполните анкету или напишите менеджеру. Можно сохранить ответы и вернуться позже.
           </p>
           <div className="hero__actions">
             <Button
@@ -80,7 +89,7 @@ export const HomeScreen = ({
               size="large"
               type="button"
             >
-              Начать бриф
+              Заполнить анкету
             </Button>
             <Button
               className="hero__secondary"
@@ -106,20 +115,12 @@ export const HomeScreen = ({
       </section>
 
       <section className="home-actions">
-        <div className="section-heading">
-          <div>
-            <span className="section-heading__index">02 / Маршрут</span>
-            <h2>С чего начнём</h2>
-            <p>Выберите удобный сценарий</p>
-          </div>
-        </div>
-
         {draftStep === null ? null : (
-          <div className="draft-banner">
+          <div className="draft-banner draft-banner--priority">
             <Icon name="clock" size={22} />
             <div>
-              <strong>Есть сохранённый черновик · шаг {draftStep} из 17</strong>
-              <small>{draftUpdatedAt ?? 'Данные сохранены на этом устройстве'}</small>
+              <strong>Продолжить анкету · шаг {draftStep} из 17</strong>
+              <small>{draftUpdatedAt ?? 'Ответы сохранены на этом устройстве'}</small>
             </div>
             <button onClick={() => onNavigate('brief')} type="button">
               Продолжить
@@ -127,10 +128,40 @@ export const HomeScreen = ({
           </div>
         )}
 
-        <div className="action-grid">
-          {actions.map((action, index) => (
+        <div className="section-heading">
+          <div>
+            <span className="section-heading__index">Как это работает</span>
+            <h2>Три простых шага</h2>
+            <p>Без сложных терминов — только нужное для заявки</p>
+          </div>
+        </div>
+
+        <ol className="how-steps">
+          {howItWorks.map((step, index) => (
+            <li className="how-steps__item" key={step.title}>
+              <span className="how-steps__num" aria-hidden="true">
+                {index + 1}
+              </span>
+              <div>
+                <strong>{step.title}</strong>
+                <small>{step.text}</small>
+              </div>
+            </li>
+          ))}
+        </ol>
+
+        <div className="section-heading">
+          <div>
+            <span className="section-heading__index">С чего начать</span>
+            <h2>Выберите действие</h2>
+            <p>Любой путь можно сменить позже</p>
+          </div>
+        </div>
+
+        <div className="action-grid action-grid--friendly">
+          {actions.map((action) => (
             <button
-              className="action-card"
+              className="action-card action-card--friendly"
               key={action.label}
               onClick={() => {
                 if (action.route === undefined) onSupport();
@@ -138,11 +169,8 @@ export const HomeScreen = ({
               }}
               type="button"
             >
-              <span className="action-card__topline">
-                <span className="action-card__index">{String(index + 1).padStart(2, '0')}</span>
-                <span className="action-card__icon">
-                  <Icon name={action.icon} size={22} />
-                </span>
+              <span className="action-card__icon">
+                <Icon name={action.icon} size={22} />
               </span>
               <span className="action-card__copy">
                 <span>
@@ -155,27 +183,21 @@ export const HomeScreen = ({
           ))}
         </div>
 
-        <div className="metric-strip" aria-label="Возможности брифа">
-          <div>
-            <strong>17</strong>
-            <span>понятных шагов</span>
-          </div>
-          <div>
-            <strong>8</strong>
-            <span>реальных проектов</span>
-          </div>
-          <div>
-            <strong>Auto</strong>
-            <span>сохранение</span>
-          </div>
-        </div>
+        <button className="home-support" onClick={onSupport} type="button">
+          <Icon name="chat" size={20} />
+          <span>
+            <strong>Связаться с менеджером</strong>
+            <small>Напишите в чат MAX — ответим по задаче</small>
+          </span>
+          <Icon name="arrow" size={18} />
+        </button>
 
-        <div className="trust-panel">
+        <div className="trust-panel trust-panel--compact">
           <div>
-            <span className="section-heading__index">03 / Данные</span>
+            <span className="section-heading__index">Данные</span>
             <h2>Только необходимое</h2>
             <p>
-              До согласия данные не уходят на сервер. Черновик можно продолжить позже, а заявку —
+              До согласия данные не уходят на сервер. Черновик можно продолжить позже, заявку —
               отправить только вручную.
             </p>
           </div>

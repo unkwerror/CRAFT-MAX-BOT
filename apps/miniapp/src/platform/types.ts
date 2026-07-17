@@ -68,6 +68,8 @@ export interface MaxWebAppBridge {
   requestContact(): Promise<MaxContactData>;
   openLink(url: string): void;
   openMaxLink(url: string): void;
+  /** Close the Mini App when supported by the host. */
+  close?(): void;
   /** Flexible event API (e.g. themeChanged, viewportChanged) when the host supports it. */
   onEvent?(eventType: string, callback: (...args: unknown[]) => void): void;
   offEvent?(eventType: string, callback: (...args: unknown[]) => void): void;
@@ -96,6 +98,8 @@ export interface MaxBridgeAdapter {
   requestContact(): Promise<MaxContactData>;
   openLink(url: string): boolean;
   openMaxLink(url: string): boolean;
+  /** Best-effort close of the Mini App (no-op outside MAX). */
+  close(): void;
 }
 
 export interface MediaQueryChangeEventLike {

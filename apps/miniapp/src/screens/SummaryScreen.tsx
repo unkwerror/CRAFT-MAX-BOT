@@ -228,7 +228,7 @@ export const SummaryScreen = ({
       )}
 
       <StickyActions
-        backLabel="Назад к брифу"
+        backLabel="Назад к анкете"
         continueDisabled={isSubmitting}
         continueLabel="Отправить заявку"
         loading={isSubmitting}

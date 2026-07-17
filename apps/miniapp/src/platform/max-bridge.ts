@@ -408,6 +408,17 @@ class MaxBridgeAdapterImpl implements MaxBridgeAdapter {
     return this.open(normalizeUrl(value, true), 'openMaxLink');
   }
 
+  close(): void {
+    try {
+      const webApp = this.getWebApp() as (MaxWebAppBridge & { close?: () => void }) | undefined;
+      if (typeof webApp?.close === 'function') {
+        webApp.close();
+      }
+    } catch {
+      // Host may not support closing the Mini App.
+    }
+  }
+
   private getWebApp(): MaxWebAppBridge | undefined {
     try {
       return this.host?.WebApp;

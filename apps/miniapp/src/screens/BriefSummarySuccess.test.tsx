@@ -173,7 +173,7 @@ describe('SuccessScreen', () => {
     expect(screen.getByRole('heading', { name: 'Заявка принята' })).toBeTruthy();
     expect(
       screen.getByText(
-        /Менеджер свяжется с вами\. Сохраните номер заявки — по нему можно уточнить статус\./,
+        /Менеджер КРАФТ напишет вам в MAX\. Сохраните номер заявки — по нему удобно уточнять статус\./,
       ),
     ).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/Демонстрационный API|mock/i);
@@ -182,16 +182,16 @@ describe('SuccessScreen', () => {
     expect(screen.getByText('Общественный центр')).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/SLA|₽|стоимост|срок/i);
 
-    const openChat = screen.getByRole('button', { name: 'Открыть чат' });
+    const openChat = screen.getByRole('button', { name: 'Написать менеджеру' });
     const home = screen.getByRole('button', { name: 'На главную' });
-    const newRequest = screen.getByRole('button', { name: 'Новый запрос' });
+    const newRequest = screen.getByRole('button', { name: 'Добавить материалы' });
     const actions = openChat.closest('.success-actions');
     if (!(actions instanceof HTMLElement)) throw new Error('Expected success actions container');
     const buttons = within(actions).getAllByRole('button');
     expect(buttons.map((button) => button.textContent)).toEqual([
-      'Открыть чат',
+      'Написать менеджеру',
       'На главную',
-      'Новый запрос',
+      'Добавить материалы',
     ]);
     expect(openChat.className).toMatch(/success-actions__primary/);
 
