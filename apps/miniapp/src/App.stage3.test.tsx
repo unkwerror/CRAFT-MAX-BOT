@@ -255,7 +255,7 @@ describe('App Stage 3 runtime', () => {
   it('opens the configured MAX manager chat from the home screen', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
-    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '347125190');
+    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '61096226');
     vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
     vi.stubEnv('VITE_CONSENT_VERSION', '');
     const webApp = installMaxBridge();
@@ -265,7 +265,7 @@ describe('App Stage 3 runtime', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
 
-    expect(webApp.openMaxLink).toHaveBeenCalledWith('https://max.ru/347125190');
+    expect(webApp.openMaxLink).toHaveBeenCalledWith('https://max.ru/61096226');
     expect(screen.queryByText(/Не удалось открыть чат/)).toBeNull();
   });
 
@@ -289,7 +289,7 @@ describe('App Stage 3 runtime', () => {
   it('shows a safe fallback when MAX and the browser cannot open the manager link', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
-    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '347125190');
+    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '61096226');
     vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
     vi.stubEnv('VITE_CONSENT_VERSION', '');
     vi.spyOn(window, 'open').mockReturnValue(null);
@@ -300,7 +300,7 @@ describe('App Stage 3 runtime', () => {
     await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
 
     expect(window.open).toHaveBeenCalledWith(
-      'https://max.ru/347125190',
+      'https://max.ru/61096226',
       '_blank',
       'noopener,noreferrer',
     );

@@ -15,12 +15,12 @@ describe('MAX bot runtime configuration', () => {
     expect(
       resolveMaxBotConfiguration({
         VITE_MAX_BOT_URL: 'https://max.ru/se13560957_bot',
-        VITE_MAX_MANAGER_USER_ID: '347125190',
+        VITE_MAX_MANAGER_USER_ID: '61096226',
       }),
     ).toEqual({
       url: 'https://max.ru/se13560957_bot',
-      managerUserId: '347125190',
-      managerUrl: 'https://max.ru/347125190',
+      managerUserId: '61096226',
+      managerUrl: 'https://max.ru/61096226',
     });
   });
 
@@ -49,7 +49,7 @@ describe('MAX bot runtime configuration', () => {
     });
   });
 
-  it.each(['0', 'abc', '12', '347125190;', '347125190/extra'])(
+  it.each(['0', 'abc', '12', '61096226;', '61096226/extra'])(
     'rejects an unsafe manager user id: %s',
     (value) => {
       expect(
