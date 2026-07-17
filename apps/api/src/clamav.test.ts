@@ -83,7 +83,7 @@ describe('ClamAV INSTREAM client', () => {
     const server = await fakeClamd(
       socket,
       'stream: OK',
-      'ClamAV 1.5.3/28000/Mon Jul 13 05:00:00 2026',
+      'ClamAV 1.5.3/28000/Mon Jul 06 05:00:00 2026',
     );
     try {
       await expect(

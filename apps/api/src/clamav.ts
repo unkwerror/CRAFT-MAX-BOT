@@ -4,7 +4,9 @@ import { createConnection, type Socket } from 'node:net';
 
 const CLAMAV_CHUNK_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 4 * 1024;
-const DEFAULT_MAXIMUM_SIGNATURE_AGE_MS = 48 * 60 * 60 * 1_000;
+// ClamAV CDN occasionally lags on daily patches; allow a week so readiness
+// does not fail-closed while freshclam is waiting for the next mirror update.
+const DEFAULT_MAXIMUM_SIGNATURE_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
 const MAXIMUM_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 
 export type ClamAvVerdict =
