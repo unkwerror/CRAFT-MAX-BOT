@@ -4204,17 +4204,69 @@ body {
     background: color-mix(in srgb, var(--app-accent-soft) 100%, var(--app-bg-elevated));
   }
 
+  /*
+   * Global .action-card:hover forces #0a0b0c on brand blue — wrong for friendly
+   * list rows in dark theme (dark text on dark soft surface). Override fully.
+   */
   .action-card--friendly:hover,
   .action-card--friendly:first-child:hover {
-    color: var(--app-ink);
-    border-color: var(--app-border);
-    background: color-mix(in srgb, var(--app-accent-soft) 55%, transparent);
+    z-index: 1;
+    padding-right: 4px !important;
+    padding-left: 4px !important;
+    color: var(--app-ink) !important;
+    border-color: var(--app-accent-brand) !important;
+    background: color-mix(in srgb, var(--app-accent-soft) 72%, var(--app-bg-elevated)) !important;
     transform: translateX(2px);
+  }
+
+  .action-card--friendly:hover small,
+  .action-card--friendly:first-child:hover small {
+    color: var(--app-ink-muted) !important;
+  }
+
+  .action-card--friendly:hover .action-card__icon,
+  .action-card--friendly:first-child:hover .action-card__icon {
+    color: var(--app-accent-deep) !important;
+    border-color: color-mix(in srgb, var(--app-accent-brand) 50%, var(--app-border)) !important;
+    background: color-mix(in srgb, var(--app-accent-soft) 88%, var(--app-bg-elevated)) !important;
+    transform: none !important;
+  }
+
+  .action-card--friendly:hover > svg,
+  .action-card--friendly:first-child:hover > svg {
+    color: var(--app-accent-deep) !important;
+    transform: translateX(3px);
+  }
+
+  .home-support:hover strong,
+  .home-support:hover small {
+    color: inherit;
+  }
+
+  .home-support:hover {
+    color: var(--app-ink);
   }
 
   .filter-panel__toggle:hover {
     color: var(--app-accent-deep);
   }
+}
+
+:root[data-theme='dark'] .action-card--friendly:hover,
+:root[data-theme='dark'] .action-card--friendly:first-child:hover {
+  color: var(--app-ink) !important;
+  background: color-mix(in srgb, var(--app-accent-soft) 100%, var(--app-bg-muted)) !important;
+}
+
+:root[data-theme='dark'] .action-card--friendly:hover small,
+:root[data-theme='dark'] .action-card--friendly:first-child:hover small {
+  color: var(--app-ink-muted) !important;
+}
+
+:root[data-theme='dark'] .action-card--friendly:hover .action-card__icon,
+:root[data-theme='dark'] .action-card--friendly:first-child:hover .action-card__icon {
+  color: var(--app-accent-deep) !important;
+  background: color-mix(in srgb, var(--app-accent-soft) 100%, var(--app-bg-elevated)) !important;
 }
 
 @media (max-width: 360px) {
