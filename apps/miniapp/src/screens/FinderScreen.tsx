@@ -234,7 +234,7 @@ export const FinderScreen = ({ initialInput, onBack, onDiscuss }: FinderScreenPr
           <InlineNotice icon="spark">{MOCK_CONTENT_NOTICE}</InlineNotice>
           <StickyActions
             continueDisabled={diagnosticInput === null}
-            continueLabel="Подобрать направления"
+            continueLabel="Подобрать"
             onBack={onBack}
             onContinue={runDiagnostic}
           />

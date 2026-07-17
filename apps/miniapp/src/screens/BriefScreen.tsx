@@ -692,7 +692,7 @@ export const BriefScreen = ({
       <ScreenHeader
         eyebrow={`Шаг ${String(step)} из ${String(BRIEF_TOTAL_STEPS)}`}
         onBack={onBack}
-        subtitle="Анкета по проекту"
+        subtitle="Короткая анкета — можно сохранить и вернуться"
         title="Новый проект"
       />
       {statusLine === null ? null : (

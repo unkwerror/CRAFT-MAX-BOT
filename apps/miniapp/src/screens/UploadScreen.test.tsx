@@ -228,7 +228,7 @@ describe('UploadScreen', () => {
 
     expect(await screen.findByText('Проверяем файл…')).toBeTruthy();
     expect(
-      (screen.getByRole('button', { name: 'Продолжить без файлов' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'Без файлов' }) as HTMLButtonElement).disabled,
     ).toBe(true);
     await waitFor(() => expect(onDocumentAdded).toHaveBeenCalledWith(UPLOAD_ID), {
       timeout: 2_500,

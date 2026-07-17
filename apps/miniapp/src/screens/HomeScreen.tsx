@@ -68,6 +68,19 @@ export const HomeScreen = ({
 }: HomeScreenProps) => (
   <Page>
     <div className="home-layout home-layout--friendly">
+      {draftStep === null ? null : (
+        <div className="draft-banner draft-banner--priority">
+          <Icon name="clock" size={22} />
+          <div>
+            <strong>Продолжить анкету · шаг {draftStep} из 17</strong>
+            <small>{draftUpdatedAt ?? 'Ответы сохранены на этом устройстве'}</small>
+          </div>
+          <button onClick={() => onNavigate('brief')} type="button">
+            Продолжить
+          </button>
+        </div>
+      )}
+
       <section className="hero hero--friendly">
         <div className="hero__content">
           <span className="hero__eyebrow hero__eyebrow--soft">
@@ -115,19 +128,6 @@ export const HomeScreen = ({
       </section>
 
       <section className="home-actions">
-        {draftStep === null ? null : (
-          <div className="draft-banner draft-banner--priority">
-            <Icon name="clock" size={22} />
-            <div>
-              <strong>Продолжить анкету · шаг {draftStep} из 17</strong>
-              <small>{draftUpdatedAt ?? 'Ответы сохранены на этом устройстве'}</small>
-            </div>
-            <button onClick={() => onNavigate('brief')} type="button">
-              Продолжить
-            </button>
-          </div>
-        )}
-
         <div className="section-heading">
           <div>
             <span className="section-heading__index">Как это работает</span>
@@ -169,16 +169,14 @@ export const HomeScreen = ({
               }}
               type="button"
             >
-              <span className="action-card__icon">
-                <Icon name={action.icon} size={22} />
+              <span className="action-card__icon" aria-hidden="true">
+                <Icon name={action.icon} size={20} />
               </span>
-              <span className="action-card__copy">
-                <span>
-                  <strong>{action.label}</strong>
-                  <small>{action.description}</small>
-                </span>
-                <Icon name="chevron" size={18} />
+              <span className="action-card__body">
+                <strong>{action.label}</strong>
+                <small>{action.description}</small>
               </span>
+              <Icon name="chevron" size={18} />
             </button>
           ))}
         </div>

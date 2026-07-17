@@ -86,7 +86,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Reading the three public build settings from the protected server environment..."
+echo "Reading the public build settings from the protected server environment..."
 if ! public_configuration="$("${ssh_command[@]}" bash -s -- "${DEPLOY_ROOT}/shared/.env" 2>/dev/null <<'REMOTE_CONFIG'
 set -Eeuo pipefail
 [[ "$-" != *x* ]] || exit 2
@@ -101,18 +101,21 @@ set +a
 : "${PRIVACY_POLICY_URL:?}"
 : "${CONSENT_VERSION:?}"
 : "${MAX_BOT_PUBLIC_NAME:?}"
+: "${MAX_MANAGER_USER_ID:?}"
 [[ "${PRIVACY_POLICY_URL}" != *$'\n'* && "${CONSENT_VERSION}" != *$'\n'* && \
-  "${MAX_BOT_PUBLIC_NAME}" != *$'\n'* ]] || exit 2
-printf '%s\n%s\n%s\n' "${PRIVACY_POLICY_URL}" "${CONSENT_VERSION}" "${MAX_BOT_PUBLIC_NAME}"
+  "${MAX_BOT_PUBLIC_NAME}" != *$'\n'* && "${MAX_MANAGER_USER_ID}" != *$'\n'* ]] || exit 2
+printf '%s\n%s\n%s\n%s\n' \
+  "${PRIVACY_POLICY_URL}" "${CONSENT_VERSION}" "${MAX_BOT_PUBLIC_NAME}" "${MAX_MANAGER_USER_ID}"
 REMOTE_CONFIG
 )"; then
-  die "Could not read the public privacy URL, consent version and MAX bot name from the server environment."
+  die "Could not read privacy URL, consent version, bot name and manager id from the server environment."
 fi
 mapfile -t public_values <<<"${public_configuration}"
-[[ "${#public_values[@]}" -eq 3 ]] || die "Server public build settings are missing or malformed."
+[[ "${#public_values[@]}" -eq 4 ]] || die "Server public build settings are missing or malformed."
 PRIVACY_POLICY_URL="${public_values[0]}"
 CONSENT_VERSION="${public_values[1]}"
 MAX_BOT_PUBLIC_NAME="${public_values[2]}"
+MAX_MANAGER_USER_ID="${public_values[3]}"
 unset public_configuration public_values
 
 [[ "${PRIVACY_POLICY_URL}" == "${PUBLIC_BASE_URL}/privacy.html" ]] ||
@@ -121,6 +124,8 @@ unset public_configuration public_values
   die "CONSENT_VERSION has an invalid format."
 [[ "${MAX_BOT_PUBLIC_NAME}" =~ ^[A-Za-z0-9_]+$ ]] ||
   die "MAX_BOT_PUBLIC_NAME has an invalid format."
+[[ "${MAX_MANAGER_USER_ID}" =~ ^[1-9][0-9]{4,20}$ ]] ||
+  die "MAX_MANAGER_USER_ID must be a numeric MAX user id."
 MAX_BOT_URL="https://max.ru/${MAX_BOT_PUBLIC_NAME}"
 unset MAX_BOT_PUBLIC_NAME
 
@@ -155,9 +160,10 @@ echo "Installing and building committed sources..."
   VITE_PRIVACY_POLICY_URL="${PRIVACY_POLICY_URL}" \
     VITE_CONSENT_VERSION="${CONSENT_VERSION}" \
     VITE_MAX_BOT_URL="${MAX_BOT_URL}" \
+    VITE_MAX_MANAGER_USER_ID="${MAX_MANAGER_USER_ID}" \
     corepack pnpm --filter @craft72/miniapp build
 )
-unset PRIVACY_POLICY_URL CONSENT_VERSION MAX_BOT_URL
+unset PRIVACY_POLICY_URL CONSENT_VERSION MAX_BOT_URL MAX_MANAGER_USER_ID
 
 [[ -s "${REPOSITORY_ROOT}/apps/miniapp/dist/index.html" ]] || die "Mini App build did not produce index.html."
 [[ -s "${REPOSITORY_ROOT}/apps/miniapp/dist/privacy.html" ]] || die "Mini App build did not include privacy.html."

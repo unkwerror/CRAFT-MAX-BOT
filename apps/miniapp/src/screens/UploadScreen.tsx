@@ -896,7 +896,7 @@ export const UploadScreen = ({
       {onDone === undefined ? null : (
         <StickyActions
           continueDisabled={hasPendingUploads}
-          continueLabel={hasAttachedDocuments ? 'Продолжить' : 'Продолжить без файлов'}
+          continueLabel={hasAttachedDocuments ? 'Продолжить' : 'Без файлов'}
           {...(onBack === undefined ? {} : { onBack })}
           onContinue={onDone}
         />

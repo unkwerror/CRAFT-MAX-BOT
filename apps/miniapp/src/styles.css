@@ -3962,36 +3962,144 @@ body {
 }
 
 .action-grid--friendly {
+  display: grid;
   gap: 0;
 }
 
-.action-card--friendly {
-  min-height: 0;
-  padding: 14px 4px;
+.action-card--friendly,
+.action-card--friendly:first-child {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 20px;
+  gap: 12px;
+  align-items: center;
+  min-height: 72px;
+  padding: 12px 4px;
   border-bottom: 1px solid var(--app-border);
   background: transparent;
+  text-align: left;
   animation: card-enter 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.action-card--friendly .action-card__icon {
-  margin-bottom: 0;
+.action-card--friendly .action-card__icon,
+.action-card--friendly:first-child .action-card__icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  place-items: center;
+  color: var(--app-accent-deep);
+  border: 1px solid color-mix(in srgb, var(--app-accent-brand) 35%, var(--app-border));
+  background: color-mix(in srgb, var(--app-accent-soft) 70%, var(--app-bg-elevated));
 }
 
-.action-card--friendly .action-card__copy {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+.action-card--friendly .action-card__body {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
 }
 
 .action-card--friendly strong {
+  display: block;
   font-size: 15px;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 .action-card--friendly small {
-  margin-top: 3px;
+  display: block;
+  margin: 0;
+  max-width: none;
+  color: var(--app-ink-muted);
   font-size: 12px;
+  line-height: 1.35;
+}
+
+.action-card--friendly > svg {
+  flex: 0 0 auto;
+  color: var(--app-ink-muted);
+}
+
+/* Portfolio filters — compact toggle + always 2 columns when open */
+.filter-panel {
+  margin: 0 0 16px;
+  border-top: 1px solid var(--app-border-strong);
+  border-bottom: 1px solid var(--app-border-strong);
+}
+
+.filter-panel__toggle {
+  display: flex;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--app-ink);
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.filter-panel__toggle strong {
+  display: block;
+  font-size: 15px;
+}
+
+.filter-panel__toggle small {
+  display: block;
+  margin-top: 3px;
+  color: var(--app-ink-muted);
+  font-size: 12px;
+}
+
+.filter-panel__toggle svg {
+  flex: 0 0 auto;
+  transform: rotate(90deg);
+  transition: transform 180ms ease;
+}
+
+.filter-panel__toggle[aria-expanded='true'] svg {
+  transform: rotate(-90deg);
+}
+
+.filter-panel__toggle.is-active strong {
+  color: var(--app-accent-deep);
+}
+
+.filter-bar--compact {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 10px 12px;
+  margin: 0 0 12px;
+  padding: 0 0 14px;
+  border: 0;
+  background: transparent;
+  animation: reveal-up 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.filter-bar--compact .filter-select__trigger {
+  min-height: 42px;
+  padding: 8px 0;
+  font-size: 14px;
+}
+
+.draft-banner--priority {
+  margin: 0 0 14px;
+}
+
+.hero--friendly .hero__content {
+  margin-top: 0;
+}
+
+.hero--friendly .hero__media {
+  max-height: 200px;
+}
+
+.hero--friendly .hero__media img {
+  max-height: 200px;
+  object-fit: cover;
 }
 
 .home-support {
@@ -4096,10 +4204,22 @@ body {
     background: color-mix(in srgb, var(--app-accent-soft) 100%, var(--app-bg-elevated));
   }
 
-  .action-card--friendly:hover {
+  .action-card--friendly:hover,
+  .action-card--friendly:first-child:hover {
     color: var(--app-ink);
+    border-color: var(--app-border);
     background: color-mix(in srgb, var(--app-accent-soft) 55%, transparent);
     transform: translateX(2px);
+  }
+
+  .filter-panel__toggle:hover {
+    color: var(--app-accent-deep);
+  }
+}
+
+@media (max-width: 360px) {
+  .filter-bar--compact {
+    grid-template-columns: 1fr !important;
   }
 }
 
@@ -4109,4 +4229,167 @@ body {
 
 :root[data-theme='dark'] .home-support {
   background: color-mix(in srgb, var(--app-accent-soft) 100%, var(--app-bg-elevated));
+}
+
+/* ── UX polish from full-screen Playwright audit ─────────────────────── */
+
+/* Draft resume CTA was ~28px tall — raise to touch target */
+.draft-banner {
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+}
+
+.draft-banner button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  min-width: 108px;
+  padding: 10px 14px;
+  color: var(--app-warning);
+  border: 1px solid color-mix(in srgb, var(--app-warning) 40%, transparent);
+  background: color-mix(in srgb, var(--app-warning) 10%, var(--app-bg-elevated));
+  font-size: 13px;
+  font-weight: 750;
+}
+
+/* Soften preview ribbon: less shouting, still visible */
+.mock-ribbon {
+  min-height: 32px;
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  text-transform: none;
+}
+
+/* Sticky CTAs: stop MaxUI single-line ellipsis truncation */
+.sticky-actions__row > button {
+  height: auto !important;
+  min-height: 52px !important;
+  padding: 10px 12px !important;
+  white-space: normal !important;
+  line-height: 1.25 !important;
+}
+
+.sticky-actions__row > button [class*='EllipsisText'],
+.sticky-actions__row > button [class*='Button__content'] {
+  display: block !important;
+  max-width: 100%;
+  overflow: visible !important;
+  white-space: normal !important;
+  text-overflow: unset !important;
+  -webkit-line-clamp: unset !important;
+  line-height: 1.25 !important;
+  text-align: center;
+}
+
+.case-card__actions > button [class*='EllipsisText'],
+.case-card__cta [class*='EllipsisText'],
+.hero__actions > button [class*='EllipsisText'],
+.success-actions > button [class*='EllipsisText'] {
+  display: block !important;
+  overflow: visible !important;
+  white-space: normal !important;
+  text-overflow: unset !important;
+  -webkit-line-clamp: unset !important;
+  line-height: 1.25 !important;
+}
+
+/* Case cards: meta chips more readable, actions less cramped */
+.case-card__meta {
+  gap: 6px;
+}
+
+.case-card__meta span {
+  max-width: 100%;
+  padding: 6px 8px;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.case-card__actions {
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.case-link {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+/* Filter panel open state: clearer surface */
+.filter-panel__toggle {
+  min-height: 58px;
+}
+
+.filter-bar--compact {
+  padding-top: 4px;
+}
+
+/* Brief/upload form cards: breathing room above sticky bar */
+.page--with-nav .form-card,
+.page--with-nav .finder-steps,
+.page--with-nav .upload-block {
+  padding-bottom: 8px;
+}
+
+/* Choice chips in finder: denser but still tappable */
+.chip {
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+/* Screen header: keep title from colliding with sticky topbar feel */
+.screen-header {
+  position: relative;
+  z-index: 1;
+}
+
+/* Privacy long copy readability */
+.privacy-copy p,
+.privacy-copy li {
+  color: var(--app-ink-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.privacy-copy h2,
+.privacy-copy h3 {
+  color: var(--app-ink);
+  margin-top: 1.1em;
+}
+
+/* Topbar brand remains tappable without huge hit slop issues */
+.app-topbar {
+  z-index: 50;
+}
+
+/* Ensure bottom content not hidden under bottom nav on tall pages */
+.page--with-nav {
+  padding-bottom: calc(108px + env(safe-area-inset-bottom));
+}
+
+@media (max-width: 380px) {
+  .sticky-actions__row {
+    grid-template-columns: minmax(84px, 0.68fr) minmax(0, 1.32fr);
+  }
+
+  .sticky-actions__row > button {
+    font-size: 11px !important;
+    padding: 10px 8px !important;
+  }
+
+  .draft-banner {
+    flex-wrap: wrap;
+  }
+
+  .draft-banner button {
+    width: 100%;
+  }
 }

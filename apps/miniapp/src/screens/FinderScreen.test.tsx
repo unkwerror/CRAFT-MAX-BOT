@@ -23,7 +23,7 @@ describe('FinderScreen', () => {
       <FinderScreen initialInput={COMPLETE_DIAGNOSTIC} onBack={vi.fn()} onDiscuss={onDiscuss} />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Подобрать направления' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Подобрать' }));
 
     expect(screen.getByRole('heading', { name: 'Подходящие направления' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Реставрация и приспособление ОКН' })).toBeTruthy();
@@ -45,7 +45,7 @@ describe('FinderScreen', () => {
     render(<FinderScreen onBack={vi.fn()} onDiscuss={vi.fn()} />);
 
     const action = screen.getByRole('button', {
-      name: 'Подобрать направления',
+      name: 'Подобрать',
     }) as HTMLButtonElement;
     expect(action.disabled).toBe(true);
   });

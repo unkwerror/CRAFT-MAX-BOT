@@ -578,7 +578,9 @@ export const App = () => {
   );
 
   const handleOpenManagerChat = useCallback((): void => {
-    if (maxBotConfiguration.url === null) {
+    // Prefer a direct manager dialog; fall back to the bot profile if user id is not set.
+    const managerLink = maxBotConfiguration.managerUrl ?? maxBotConfiguration.url;
+    if (managerLink === null) {
       showToast(
         'Чат с менеджером временно недоступен. Закройте приложение и напишите боту КРАФТ в MAX.',
         'error',
@@ -587,19 +589,19 @@ export const App = () => {
     }
 
     try {
-      const opened = maxBridge.openMaxLink(maxBotConfiguration.url);
+      const opened = maxBridge.openMaxLink(managerLink);
       if (!opened) {
         showToast(
-          'Не удалось открыть чат. Закройте Mini App и напишите боту КРАФТ в MAX.',
+          'Не удалось открыть чат. Закройте Mini App и напишите менеджеру КРАФТ в MAX.',
           'error',
         );
         return;
       }
-      // Prefer landing in the bot dialog after opening the chat deep-link.
+      // Prefer landing in the MAX dialog after opening the chat deep-link.
       maxBridge.close();
     } catch {
       showToast(
-        'Не удалось открыть чат. Закройте Mini App и напишите боту КРАФТ в MAX.',
+        'Не удалось открыть чат. Закройте Mini App и напишите менеджеру КРАФТ в MAX.',
         'error',
       );
     }

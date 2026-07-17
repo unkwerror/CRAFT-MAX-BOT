@@ -51,6 +51,7 @@ export const CasesScreen = ({
   selectedCaseIds = [],
 }: CasesScreenProps) => {
   const [filters, setFilters] = useState<CaseFilters>(EMPTY_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [linkError, setLinkError] = useState(false);
   const cities = useMemo(
     () =>
@@ -95,62 +96,90 @@ export const CasesScreen = ({
       <ScreenHeader
         eyebrow="Портфолио"
         onBack={onBack}
-        subtitle="Реализованные и проектируемые объекты из портфолио бюро."
+        subtitle="Примеры работ бюро — выберите похожий объект или откройте страницу проекта."
         title="Проекты КРАФТ"
       />
 
       <InlineNotice icon="projects">
-        В каталоге используются фотографии проектов с официального сайта КРАФТ.
+        Фото проектов с официального сайта КРАФТ. Можно сузить список фильтрами.
       </InlineNotice>
 
-      <section aria-label="Фильтры проектов" className="filter-bar">
-        <FilterSelect
-          label="Тип объекта"
-          onChange={(objectType) => updateFilter({ objectType })}
-          options={OBJECT_TYPE_OPTIONS}
-          value={filters.objectType}
-        />
-        <FilterSelect
-          label="Услуга"
-          onChange={(service) => updateFilter({ service })}
-          options={SERVICE_OPTIONS}
-          value={filters.service}
-        />
-        <FilterSelect
-          label="Масштаб"
-          onChange={(scale) => updateFilter({ scale })}
-          options={SCALE_OPTIONS}
-          value={filters.scale}
-        />
-        <FilterSelect
-          label="Тип работ"
-          onChange={(constructionKind) => updateFilter({ constructionKind })}
-          options={CONSTRUCTION_KIND_OPTIONS}
-          value={filters.constructionKind}
-        />
-        <FilterSelect
-          label="Регион"
-          onChange={(region) =>
-            updateFilter({
-              region,
-              ...(filters.city !== '' &&
-              !MOCK_CASE_CATALOG.some(
-                (item) => item.city === filters.city && (region === '' || item.region === region),
-              )
-                ? { city: '' }
-                : {}),
-            })
+      <div className="filter-panel">
+        <button
+          aria-controls="case-filters"
+          aria-expanded={filtersOpen}
+          className={
+            hasActiveFilters ? 'filter-panel__toggle is-active' : 'filter-panel__toggle'
           }
-          options={REGIONS.map((region) => ({ label: region, value: region }))}
-          value={filters.region}
-        />
-        <FilterSelect
-          label="Город"
-          onChange={(city) => updateFilter({ city })}
-          options={cities.map((city) => ({ label: city, value: city }))}
-          value={filters.city}
-        />
-      </section>
+          onClick={() => setFiltersOpen((open) => !open)}
+          type="button"
+        >
+          <span>
+            <strong>Фильтры</strong>
+            <small>
+              {hasActiveFilters
+                ? `Выбрано: ${String(Object.values(filters).filter((value) => value !== '').length)}`
+                : 'Тип, услуга, город и другие параметры'}
+            </small>
+          </span>
+          <Icon name="chevron" size={18} />
+        </button>
+        {filtersOpen ? (
+          <section
+            aria-label="Фильтры проектов"
+            className="filter-bar filter-bar--compact"
+            id="case-filters"
+          >
+            <FilterSelect
+              label="Тип объекта"
+              onChange={(objectType) => updateFilter({ objectType })}
+              options={OBJECT_TYPE_OPTIONS}
+              value={filters.objectType}
+            />
+            <FilterSelect
+              label="Услуга"
+              onChange={(service) => updateFilter({ service })}
+              options={SERVICE_OPTIONS}
+              value={filters.service}
+            />
+            <FilterSelect
+              label="Масштаб"
+              onChange={(scale) => updateFilter({ scale })}
+              options={SCALE_OPTIONS}
+              value={filters.scale}
+            />
+            <FilterSelect
+              label="Тип работ"
+              onChange={(constructionKind) => updateFilter({ constructionKind })}
+              options={CONSTRUCTION_KIND_OPTIONS}
+              value={filters.constructionKind}
+            />
+            <FilterSelect
+              label="Регион"
+              onChange={(region) =>
+                updateFilter({
+                  region,
+                  ...(filters.city !== '' &&
+                  !MOCK_CASE_CATALOG.some(
+                    (item) =>
+                      item.city === filters.city && (region === '' || item.region === region),
+                  )
+                    ? { city: '' }
+                    : {}),
+                })
+              }
+              options={REGIONS.map((region) => ({ label: region, value: region }))}
+              value={filters.region}
+            />
+            <FilterSelect
+              label="Город"
+              onChange={(city) => updateFilter({ city })}
+              options={cities.map((city) => ({ label: city, value: city }))}
+              value={filters.city}
+            />
+          </section>
+        ) : null}
+      </div>
 
       {linkError ? (
         <InlineNotice icon="shield" tone="warning">

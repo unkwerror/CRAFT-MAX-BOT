@@ -19,6 +19,7 @@ describe('CasesScreen', () => {
     render(<CasesScreen bridge={bridge} onBack={vi.fn()} onDiscuss={onDiscuss} />);
 
     expect(screen.getAllByRole('article')).toHaveLength(8);
+    fireEvent.click(screen.getByRole('button', { name: /Фильтры/ }));
     chooseFilter('Тип объекта', 'Общественное здание');
     chooseFilter('Услуга', 'Реконструкция и ОКН');
     chooseFilter('Город', 'Тобольск');

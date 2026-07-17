@@ -253,7 +253,11 @@ describe('App Stage 3 runtime', () => {
   });
 
   it('opens the configured MAX manager chat from the home screen', async () => {
-    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/craft72_bot');
+    vi.resetModules();
+    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
+    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '347125190');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
+    vi.stubEnv('VITE_CONSENT_VERSION', '');
     const webApp = installMaxBridge();
 
     const { App } = await import('./App.js');
@@ -261,11 +265,16 @@ describe('App Stage 3 runtime', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
 
-    expect(webApp.openMaxLink).toHaveBeenCalledWith('https://max.ru/craft72_bot');
-    expect(screen.queryByText('Не удалось открыть чат с менеджером')).toBeNull();
+    expect(webApp.openMaxLink).toHaveBeenCalledWith('https://max.ru/347125190');
+    expect(screen.queryByText(/Не удалось открыть чат/)).toBeNull();
   });
 
   it('shows a safe fallback when the MAX manager link is not configured', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_MAX_BOT_URL', '');
+    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
+    vi.stubEnv('VITE_CONSENT_VERSION', '');
     const webApp = installMaxBridge();
 
     const { App } = await import('./App.js');
@@ -278,7 +287,11 @@ describe('App Stage 3 runtime', () => {
   });
 
   it('shows a safe fallback when MAX and the browser cannot open the manager link', async () => {
-    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/craft72_bot');
+    vi.resetModules();
+    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
+    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '347125190');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
+    vi.stubEnv('VITE_CONSENT_VERSION', '');
     vi.spyOn(window, 'open').mockReturnValue(null);
 
     const { App } = await import('./App.js');
@@ -287,7 +300,7 @@ describe('App Stage 3 runtime', () => {
     await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
 
     expect(window.open).toHaveBeenCalledWith(
-      'https://max.ru/craft72_bot',
+      'https://max.ru/347125190',
       '_blank',
       'noopener,noreferrer',
     );
