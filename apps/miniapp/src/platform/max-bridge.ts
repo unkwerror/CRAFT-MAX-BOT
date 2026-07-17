@@ -415,32 +415,19 @@ class MaxBridgeAdapterImpl implements MaxBridgeAdapter {
     }
     const href = `tel:${phone}`;
     try {
-      const doc = this.host?.document;
-      if (doc !== undefined) {
-        const anchor = doc.createElement('a');
-        anchor.setAttribute('href', href);
-        anchor.setAttribute('rel', 'noopener noreferrer');
-        anchor.style.display = 'none';
-        doc.body?.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        return true;
-      }
-    } catch {
-      // Fall through to location / window.open.
-    }
-    try {
-      if (this.host?.location !== undefined) {
-        this.host.location.href = href;
-        return true;
-      }
-    } catch {
-      // ignore
-    }
-    try {
+      // Prefer host open (same pattern as HTTPS fallbacks). tel: is allowed here
+      // because openLink() intentionally rejects non-HTTPS URLs.
       if (typeof this.host?.open === 'function') {
-        const opened = this.host.open(href, '_self');
+        const opened = this.host.open(href, '_blank', 'noopener,noreferrer');
         return opened !== null;
+      }
+    } catch {
+      // Fall through.
+    }
+    try {
+      if (typeof globalThis.location?.assign === 'function') {
+        globalThis.location.assign(href);
+        return true;
       }
     } catch {
       return false;
