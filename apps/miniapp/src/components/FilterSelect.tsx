@@ -105,7 +105,7 @@ export const FilterSelect = ({
   useEffect(() => {
     if (!open) return;
     const active = listRef.current?.querySelector<HTMLElement>('[data-highlighted="true"]');
-    if (active !== null && typeof active.scrollIntoView === 'function') {
+    if (active != null && typeof active.scrollIntoView === 'function') {
       active.scrollIntoView({ block: 'nearest' });
     }
   }, [highlight, open]);
