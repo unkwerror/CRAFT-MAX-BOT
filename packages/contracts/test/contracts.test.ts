@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AdminAuthRequestSchema,
   AdminAuthResponseSchema,
+  AdminContactHandoffResponseSchema,
   AdminContentDocumentSchema,
   AdminSubmissionUpdateRequestSchema,
   AdminUserListItemSchema,
@@ -269,6 +270,14 @@ describe('MAX authentication and contact verification', () => {
 });
 
 describe('admin contracts', () => {
+  it('accepts only the explicit queued contact handoff response', () => {
+    expect(AdminContactHandoffResponseSchema.safeParse({ queued: true }).success).toBe(true);
+    expect(AdminContactHandoffResponseSchema.safeParse({ queued: false }).success).toBe(false);
+    expect(
+      AdminContactHandoffResponseSchema.safeParse({ queued: true, targetMaxUserId: '1' }).success,
+    ).toBe(false);
+  });
+
   it('accepts only a bounded password together with MAX launch proof', () => {
     expect(
       AdminAuthRequestSchema.safeParse({

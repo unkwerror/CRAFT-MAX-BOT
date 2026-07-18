@@ -2,6 +2,44 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 
 const ADMIN_INIT_DATA =
   'query_id=admin-e2e&auth_date=1784332800&start_param=admin&hash=server-validated';
+const ADMIN_SUBMISSION = {
+  submissionId: 'CRAFT72-000001',
+  maxUserId: '70000001',
+  user: {
+    id: '70000001',
+    firstName: 'Иван',
+    lastName: 'Петров',
+    username: null,
+    languageCode: 'ru',
+  },
+  intake: {
+    role: 'property_owner',
+    fullName: 'Иван Петров',
+    organization: 'ООО Проект',
+    inn: null,
+    objectType: 'public-building',
+    location: { city: 'Тюмень' },
+    scope: { kind: 'single_object' },
+    area: { status: 'unknown' },
+    currentStage: 'concept',
+    services: ['architecture'],
+    expertiseRequired: 'unknown',
+    culturalHeritageSite: 'no',
+    desiredStart: { status: 'unknown' },
+    description: 'Тестовая заявка для проверки контакта в MAX.',
+    links: [],
+    documentIds: [],
+    selectedCaseIds: [],
+    contact: { phone: '+79990000000', email: 'client@example.com' },
+    consent: { version: '2026-07-18', accepted: true },
+  },
+  phoneVerified: true,
+  integrationStatus: 'received',
+  reviewStatus: 'new',
+  adminNote: null,
+  submittedAt: '2026-07-18T08:00:00.000Z',
+  updatedAt: '2026-07-18T08:00:00.000Z',
+} as const;
 
 async function installMaxLaunch(page: Page, initData: string): Promise<void> {
   await page.addInitScript((signedInitData) => {
@@ -72,8 +110,17 @@ async function adminApiRoute(route: Route): Promise<void> {
     });
     return;
   }
-  if (url.pathname === '/api/admin/users' || url.pathname === '/api/admin/submissions') {
+  if (url.pathname.endsWith('/contact-handoff')) {
+    expect(request.method()).toBe('POST');
+    await json({ queued: true }, 202);
+    return;
+  }
+  if (url.pathname === '/api/admin/users') {
     await json({ items: [], nextCursor: null });
+    return;
+  }
+  if (url.pathname === '/api/admin/submissions') {
+    await json({ items: [ADMIN_SUBMISSION], nextCursor: null });
     return;
   }
   if (url.pathname === '/api/admin/cases' || url.pathname === '/api/admin/content') {
@@ -113,6 +160,25 @@ test('admin launch shows a responsive password login and opens the control panel
   ).toBeVisible();
   await expect(page.locator('.admin-profile')).toContainText('Администратор');
   await expect(page.locator('.admin-profile')).not.toContainText('Системный');
+
+  await page
+    .getByRole('navigation', { name: 'Разделы админ-панели' })
+    .getByRole('button', { name: /Заявки/ })
+    .click();
+  await page.getByRole('row', { name: /Иван Петров/ }).click();
+  await expect(page.getByRole('button', { name: 'Написать в MAX' })).toBeVisible();
+  await expect(page.locator('a[href^="mailto:"]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Написать в MAX' }).click();
+  await expect(page.getByRole('button', { name: 'Открыть чат с ботом' })).toBeVisible();
+
+  const detailLayout = await page.evaluate(() => ({
+    innerWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    actionsWidth:
+      document.querySelector('.admin-contact-actions')?.getBoundingClientRect().width ?? 0,
+  }));
+  expect(detailLayout.scrollWidth).toBeLessThanOrEqual(detailLayout.innerWidth);
+  expect(detailLayout.actionsWidth).toBeLessThanOrEqual(detailLayout.innerWidth);
 });
 
 test('a direct admin hash stays on the public home screen', async ({ page }) => {
@@ -122,6 +188,8 @@ test('a direct admin hash stays on the public home screen', async ({ page }) => 
   );
   await page.goto('/#admin', { waitUntil: 'domcontentloaded' });
 
-  await expect(page.getByRole('heading', { name: /Расскажите о проекте/ })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: /Расскажите о проекте|Перед началом/ }),
+  ).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Вход в КРАФТ Control' })).toHaveCount(0);
 });

@@ -609,7 +609,9 @@ export const App = () => {
   );
 
   const handleOpenManagerChat = useCallback((): void => {
-    // MAX Bridge accepts canonical https://max.ru links; numeric IDs work only in bot mentions.
+    // Numeric MAX IDs work only in bot mentions. Bot `?start=` deep links are opened as a
+    // regular HTTPS link: unlike openMaxLink (intended primarily for `?startapp=`), this works
+    // consistently in mobile MAX clients and MAX Web/Desktop.
     try {
       if (
         maxBotConfiguration.managerProfileUrl !== null &&
@@ -625,7 +627,7 @@ export const App = () => {
       if (
         maxBotConfiguration.url !== null &&
         maxBotConfiguration.managerUserId !== null &&
-        maxBridge.openMaxLink(`${maxBotConfiguration.url}?start=manager_contact`)
+        maxBridge.openLink(`${maxBotConfiguration.url}?start=manager_contact`)
       ) {
         return;
       }

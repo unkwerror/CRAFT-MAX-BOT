@@ -11,6 +11,8 @@ import type {
 } from '@craft72/contracts/source';
 
 import { Icon, type IconName } from '../components/Icon.js';
+import { maxBridge } from '../platform/index.js';
+import { maxBotConfiguration } from '../runtime/bot-config.js';
 import { adminApi, AdminApiError } from './admin-api.js';
 import { QuestionnaireEditor } from './QuestionnaireEditor.js';
 import {
@@ -71,6 +73,38 @@ const loginErrorMessage = (error: unknown): string => {
   }
   if (error.status === 0) return 'Нет соединения с сервером. Проверьте интернет.';
   return 'Сервис входа временно недоступен. Попробуйте позже.';
+};
+
+const contactHandoffErrorMessage = (error: unknown): string => {
+  if (!(error instanceof AdminApiError)) return 'Не удалось подготовить контакт в MAX.';
+  if (error.code === 'CONTACT_HANDOFF_UNAVAILABLE') {
+    return 'Снова отправьте боту команду /admin, затем повторите действие.';
+  }
+  if (error.status === 429) return 'Слишком много запросов. Подождите минуту и повторите.';
+  return errorMessage(error);
+};
+
+const copyContactValue = async (value: string): Promise<boolean> => {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    // Some MAX WebViews do not expose the Clipboard API; use a user-gesture fallback.
+  }
+  const input = document.createElement('textarea');
+  input.value = value;
+  input.readOnly = true;
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  document.body.append(input);
+  input.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    input.remove();
+  }
 };
 
 interface CursorPage<T> {
@@ -243,6 +277,19 @@ export const AdminPanel = ({ initData, onExit }: AdminPanelProps) => {
       adminApi.listContent(),
     ]);
     const [usersResult, submissionsResult, casesResult, contentResult] = results;
+    const sessionFailure = results.find(
+      (result) =>
+        result.status === 'rejected' &&
+        result.reason instanceof AdminApiError &&
+        result.reason.status === 401,
+    );
+    if (sessionFailure !== undefined) {
+      setSession(null);
+      setLoginError('Сессия не сохранилась на этом устройстве. Введите пароль ещё раз.');
+      setAuthState(initData === null ? 'error' : 'login');
+      setLoadingData(false);
+      return;
+    }
     if (usersResult.status === 'fulfilled') setUsers(usersResult.value);
     if (submissionsResult.status === 'fulfilled') setSubmissions(submissionsResult.value);
     if (casesResult.status === 'fulfilled') setCases(casesResult.value);
@@ -251,7 +298,7 @@ export const AdminPanel = ({ initData, onExit }: AdminPanelProps) => {
     if (failed?.status === 'rejected')
       setNotice({ error: true, text: errorMessage(failed.reason) });
     setLoadingData(false);
-  }, []);
+  }, [initData]);
 
   useEffect(() => {
     let active = true;
@@ -845,9 +892,11 @@ const SubmissionDetail = ({
   const [status, setStatus] = useState<SubmissionReviewStatus>(item.reviewStatus);
   const [note, setNote] = useState(item.adminNote ?? '');
   const [saving, setSaving] = useState(false);
+  const [contactState, setContactState] = useState<'idle' | 'queued' | 'queuing'>('idle');
   useEffect(() => {
     setStatus(item.reviewStatus);
     setNote(item.adminNote ?? '');
+    setContactState('idle');
   }, [item]);
   const intake = item.intake;
   const save = async (): Promise<void> => {
@@ -867,6 +916,58 @@ const SubmissionDetail = ({
       setSaving(false);
     }
   };
+  const openPhone = async (): Promise<void> => {
+    try {
+      if (maxBridge.openPhone(intake.contact.phone)) return;
+    } catch {
+      // Copying the verified number is the reliable fallback for restricted WebViews.
+    }
+    const copied = await copyContactValue(intake.contact.phone);
+    onNotice({
+      ...(copied ? {} : { error: true }),
+      text: copied
+        ? 'Телефон скопирован — вставьте его в приложение для звонков.'
+        : `Не удалось открыть звонок. Телефон: ${intake.contact.phone}`,
+    });
+  };
+  const copyEmail = async (): Promise<void> => {
+    const copied = await copyContactValue(intake.contact.email);
+    onNotice({
+      ...(copied ? {} : { error: true }),
+      text: copied
+        ? 'Email скопирован в буфер обмена.'
+        : `Не удалось скопировать email: ${intake.contact.email}`,
+    });
+  };
+  const contactInMax = async (): Promise<void> => {
+    if (contactState === 'queuing') return;
+    if (contactState === 'queued') {
+      try {
+        if (maxBotConfiguration.url !== null && maxBridge.openLink(maxBotConfiguration.url)) {
+          return;
+        }
+      } catch {
+        // Show a concrete fallback below.
+      }
+      onNotice({
+        error: true,
+        text: 'Откройте чат с ботом КРАФТ вручную — ссылка на клиента уже отправлена туда.',
+      });
+      return;
+    }
+
+    setContactState('queuing');
+    try {
+      await adminApi.queueContactHandoff(item.submissionId);
+      setContactState('queued');
+      onNotice({
+        text: 'Контакт клиента отправлен в чат с ботом. Нажмите «Открыть чат с ботом».',
+      });
+    } catch (error) {
+      setContactState('idle');
+      onNotice({ error: true, text: contactHandoffErrorMessage(error) });
+    }
+  };
   return (
     <aside className="admin-submission-detail">
       <header>
@@ -880,14 +981,27 @@ const SubmissionDetail = ({
         </button>
       </header>
       <div className="admin-contact-actions">
-        <a href={`tel:${intake.contact.phone}`}>
+        <button onClick={() => void openPhone()} type="button">
           <Icon name="phone" size={17} />
           {intake.contact.phone}
-        </a>
-        <a href={`mailto:${intake.contact.email}`}>
+        </button>
+        <button onClick={() => void copyEmail()} type="button">
           <Icon name="mail" size={17} />
-          Написать
-        </a>
+          Скопировать email
+        </button>
+        <button
+          className="admin-contact-actions__max"
+          disabled={contactState === 'queuing'}
+          onClick={() => void contactInMax()}
+          type="button"
+        >
+          <Icon name="chat" size={17} />
+          {contactState === 'queuing'
+            ? 'Готовим контакт…'
+            : contactState === 'queued'
+              ? 'Открыть чат с ботом'
+              : 'Написать в MAX'}
+        </button>
       </div>
       <dl className="admin-detail-list">
         <div>

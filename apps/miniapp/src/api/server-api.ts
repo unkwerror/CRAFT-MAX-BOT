@@ -109,6 +109,7 @@ const SAFE_ERROR_MESSAGES: Readonly<Record<Stage3ApiClientErrorCode, string>> = 
   MAX_AUTH_INVALID: 'MAX authentication failed. Reopen the mini application.',
   MAX_AUTH_EXPIRED: 'MAX authentication has expired. Reopen the mini application.',
   CONTACT_VERIFICATION_FAILED: 'The MAX contact could not be verified.',
+  CONTACT_HANDOFF_UNAVAILABLE: 'Open the administrator panel from the bot and try again.',
   DRAFT_NOT_FOUND: 'The draft was not found.',
   UPLOAD_NOT_FOUND: 'An uploaded document was not found.',
   SUBMISSION_NOT_FOUND: 'The submission was not found.',

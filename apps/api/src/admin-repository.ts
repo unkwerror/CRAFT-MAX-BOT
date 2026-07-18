@@ -32,6 +32,7 @@ import {
   contentDocuments,
   documents,
   leadDrafts,
+  maxBotOutbox,
   maxUsers,
   submissions,
   type Database,
@@ -63,6 +64,11 @@ export interface AdminStore {
   listUsers(query: AdminUserListQuery): Promise<AdminPage<AdminUserListItem>>;
   listSubmissions(query: AdminSubmissionListQuery): Promise<AdminPage<AdminSubmissionListItem>>;
   getSubmission(submissionId: string): Promise<AdminSubmissionListItem | null>;
+  queueContactHandoff(
+    submissionId: string,
+    admin: AuthenticatedAdmin,
+    requestId: string,
+  ): Promise<void>;
   updateSubmission(
     submissionId: string,
     update: AdminSubmissionUpdateRequest,
@@ -134,6 +140,13 @@ export class InvalidAdminCursorError extends Error {
   public constructor() {
     super('Admin cursor is invalid');
     this.name = 'InvalidAdminCursorError';
+  }
+}
+
+export class AdminStoreActiveDialogNotFoundError extends Error {
+  public constructor() {
+    super('The administrator has no active MAX bot dialog');
+    this.name = 'AdminStoreActiveDialogNotFoundError';
   }
 }
 
@@ -347,6 +360,26 @@ function adminUser(user: typeof maxUsers.$inferSelect): MaxUser {
     languageCode: user.languageCode,
     photoUrl: null,
   };
+}
+
+function markdownLinkLabel(value: string): string {
+  return value.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]');
+}
+
+export function buildAdminContactHandoffMessage(
+  submissionId: string,
+  target: Pick<MaxUser, 'firstName' | 'id' | 'lastName'>,
+): JsonObject {
+  const fullName = [target.firstName, target.lastName].filter(Boolean).join(' ');
+  const displayName = markdownLinkLabel(fullName);
+  return asJsonObject({
+    format: 'markdown',
+    notify: true,
+    text:
+      `Контакт по заявке **${submissionId}**\n\n` +
+      `[${displayName}](max://user/${target.id})\n\n` +
+      'Нажмите на имя, чтобы открыть профиль и написать пользователю в MAX.',
+  });
 }
 
 function submissionItem(
@@ -719,6 +752,65 @@ export class PostgresAdminStore implements AdminStore {
       result.user,
       documentIds.get(result.submission.id) ?? [],
     );
+  }
+
+  public async queueContactHandoff(
+    submissionId: string,
+    admin: AuthenticatedAdmin,
+    requestId: string,
+  ): Promise<void> {
+    const now = validNow(this.#now);
+    await this.#database.transaction(async (transaction) => {
+      const [target] = await transaction
+        .select({ submission: submissions, user: maxUsers })
+        .from(submissions)
+        .innerJoin(maxUsers, eq(maxUsers.maxUserId, submissions.maxUserId))
+        .where(eq(submissions.submissionId, submissionId))
+        .limit(1);
+      if (target === undefined) throw new AdminStoreNotFoundError();
+
+      const [dialog] = await transaction
+        .select({ chatId: botDialogs.chatId })
+        .from(botDialogs)
+        .where(
+          and(
+            eq(botDialogs.maxUserId, BigInt(admin.maxUserId)),
+            eq(botDialogs.status, 'active'),
+            // Direct MAX dialogs use positive IDs; never expose a lead profile in a group chat.
+            gt(botDialogs.chatId, 0n),
+          ),
+        )
+        .orderBy(desc(botDialogs.lastEventAt), desc(botDialogs.chatId))
+        .limit(1);
+      if (dialog === undefined) throw new AdminStoreActiveDialogNotFoundError();
+
+      const eventKey = `admin:contact-handoff:${requestId}`;
+      const actionKey = `${eventKey}:${admin.sessionId}`;
+      await transaction.insert(maxBotOutbox).values({
+        eventKey,
+        actionKey,
+        action: 'send_message',
+        chatId: dialog.chatId,
+        payload: buildAdminContactHandoffMessage(submissionId, adminUser(target.user)),
+        status: 'pending',
+        attempts: 0,
+        nextAttemptAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await transaction.insert(adminAuditLog).values({
+        actorMaxUserId: BigInt(admin.maxUserId),
+        action: 'submission.contact_handoff.queued',
+        targetType: 'submission',
+        targetId: submissionId,
+        requestId,
+        metadata: {
+          adminChatId: String(dialog.chatId),
+          targetMaxUserId: String(target.user.maxUserId),
+        },
+        createdAt: now,
+      });
+    });
   }
 
   public async updateSubmission(

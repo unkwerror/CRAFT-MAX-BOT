@@ -436,14 +436,17 @@ test('manager CTA uses a supported MAX profile or bot handoff before the phone f
     const state = await page.evaluate(
       () => (window as unknown as { readonly __maxE2e: MaxMockState }).__maxE2e,
     );
-    expect(state.maxLinks.every((url) => url.startsWith('https://max.ru/'))).toBe(true);
-    expect(state.maxLinks.every((url) => !url.startsWith('max://'))).toBe(true);
-    if (state.maxLinks.length === 0) {
+    const managerLinks = [
+      ...state.maxLinks,
+      ...state.externalLinks.filter((url) => url.startsWith('https://max.ru/')),
+    ];
+    expect(managerLinks.every((url) => !url.startsWith('max://'))).toBe(true);
+    if (managerLinks.length === 0) {
       expect(state.browserOpenUrls).toContain('tel:+79220063645');
     } else {
-      expect(state.maxLinks).toHaveLength(1);
+      expect(managerLinks).toHaveLength(1);
       expect(state.browserOpenUrls.filter((url) => url.startsWith('tel:'))).toEqual([]);
-      expect(state.maxLinks[0]).toMatch(
+      expect(managerLinks[0]).toMatch(
         /^https:\/\/max\.ru\/(?:u\/[A-Za-z0-9_-]+|[A-Za-z0-9_]+(?:\?start=manager_contact)?)$/,
       );
     }

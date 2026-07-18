@@ -6,6 +6,7 @@ import {
   AdminCaseParamsSchema,
   AdminCaseResponseSchema,
   AdminCaseUpdateRequestSchema,
+  AdminContactHandoffResponseSchema,
   AdminContentCreateRequestSchema,
   AdminContentListResponseSchema,
   AdminContentParamsSchema,
@@ -31,6 +32,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodError, ZodType } from 'zod';
 
 import {
+  AdminStoreActiveDialogNotFoundError,
   AdminStoreConflictError,
   AdminStoreNotFoundError,
   InvalidAdminCursorError,
@@ -96,14 +98,14 @@ function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date, n
   const maxAge = Math.max(1, Math.floor((expiresAt.getTime() - now.getTime()) / 1_000));
   reply.header(
     'set-cookie',
-    `${ADMIN_SESSION_COOKIE}=${token}; Path=/; Max-Age=${maxAge}; Expires=${expiresAt.toUTCString()}; Secure; HttpOnly; SameSite=Strict`,
+    `${ADMIN_SESSION_COOKIE}=${token}; Path=/; Max-Age=${maxAge}; Expires=${expiresAt.toUTCString()}; Secure; HttpOnly; SameSite=None; Partitioned`,
   );
 }
 
 function clearSessionCookie(reply: FastifyReply): void {
   reply.header(
     'set-cookie',
-    `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=Strict`,
+    `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Secure; HttpOnly; SameSite=None; Partitioned`,
   );
 }
 
@@ -116,6 +118,13 @@ async function translateStoreErrors<T>(work: Promise<T>): Promise<T> {
     }
     if (error instanceof AdminStoreConflictError) {
       throw new ApiHttpError(409, 'CONFLICT', 'The resource was changed by another administrator');
+    }
+    if (error instanceof AdminStoreActiveDialogNotFoundError) {
+      throw new ApiHttpError(
+        409,
+        'CONTACT_HANDOFF_UNAVAILABLE',
+        'Open the administrator panel from an active direct bot dialog and try again',
+      );
     }
     if (error instanceof InvalidAdminCursorError) {
       throw new ApiHttpError(400, 'VALIDATION_ERROR', 'The pagination cursor is invalid');
@@ -261,6 +270,28 @@ export function buildAdminApiModule(options: AdminApiOptions): Stage3ApiModule {
         );
         return AdminSubmissionResponseSchema.parse({ submission });
       });
+
+      app.post(
+        '/api/admin/submissions/:submissionId/contact-handoff',
+        {
+          config: {
+            rateLimit: {
+              groupId: 'admin-contact-handoff',
+              max: 10,
+              timeWindow: 60 * 1_000,
+            },
+          },
+        },
+        async (request, reply) => {
+          requireSameOrigin(request);
+          const { admin } = await authenticate(request);
+          const parameters = parseWithSchema(AdminSubmissionParamsSchema, request.params);
+          await translateStoreErrors(
+            options.store.queueContactHandoff(parameters.submissionId, admin, request.id),
+          );
+          return reply.status(202).send(AdminContactHandoffResponseSchema.parse({ queued: true }));
+        },
+      );
 
       app.get('/api/admin/cases', async (request) => {
         await authenticate(request);

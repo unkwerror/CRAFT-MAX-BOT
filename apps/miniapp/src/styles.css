@@ -3761,7 +3761,8 @@ button.admin-table__row.is-selected {
   border-bottom: 1px solid var(--admin-line);
 }
 
-.admin-contact-actions a {
+.admin-contact-actions a,
+.admin-contact-actions button {
   display: inline-flex;
   min-width: 0;
   min-height: 42px;
@@ -3770,6 +3771,7 @@ button.admin-table__row.is-selected {
   gap: 7px;
   padding: 0 9px;
   overflow: hidden;
+  border: 0;
   border-radius: 11px;
   color: var(--admin-primary);
   background: color-mix(in srgb, var(--admin-primary) 8%, var(--admin-surface));
@@ -3778,6 +3780,22 @@ button.admin-table__row.is-selected {
   text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.admin-contact-actions button {
+  cursor: pointer;
+  font: inherit;
+}
+
+.admin-contact-actions button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.admin-contact-actions .admin-contact-actions__max {
+  grid-column: 1 / -1;
+  color: #fff;
+  background: var(--admin-primary);
 }
 
 .admin-detail-list {
@@ -4747,6 +4765,10 @@ button.admin-table__row.is-selected {
   .admin-contact-actions,
   .admin-detail-list {
     grid-template-columns: 1fr;
+  }
+
+  .admin-contact-actions .admin-contact-actions__max {
+    grid-column: auto;
   }
 
   .admin-detail-list .is-wide {

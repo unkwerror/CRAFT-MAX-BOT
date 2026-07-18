@@ -11,7 +11,7 @@ only an HMAC-SHA-256 digest of a random 32-byte session credential and returns t
 `__Host-craft72-admin` cookie. The HMAC key is derived from the configured password verifier, so a
 password rotation also invalidates every existing session. Neither password nor session credential
 is included in JSON or browser storage. Mutating requests require the exact production `Origin`;
-the cookie is `Secure`, `HttpOnly`, `SameSite=Strict`, host-only and bounded by
+the cookie is `Secure`, `HttpOnly`, `SameSite=None`, `Partitioned`, host-only and bounded by
 `ADMIN_SESSION_TTL_SECONDS`.
 
 The initial API surface is:
@@ -23,6 +23,9 @@ The initial API surface is:
   application review, with filters for user, integration status and review status;
 - `PATCH /api/admin/submissions/:submissionId` — changes only `reviewStatus` and `adminNote` with an
   `expectedUpdatedAt` optimistic lock. Submitted intake and integration outbox data are immutable;
+- `POST /api/admin/submissions/:submissionId/contact-handoff` — queues a bot message in the
+  administrator's latest active MAX dialog with the applicant's supported `max://user/<id>`
+  profile mention; the queue write and audit entry are atomic;
 - `/api/admin/cases` — list/create/update/delete managed portfolio cases with numeric versions;
 - `/api/admin/content` — list/create/update/delete versioned drafts;
 - `POST /api/admin/content/:key/publish` — atomically publishes the current expected draft version;

@@ -310,8 +310,9 @@ describe('App Stage 3 runtime', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /менеджер/i }));
 
-    expect(webApp.openMaxLink).toHaveBeenCalledOnce();
-    expect(webApp.openMaxLink).toHaveBeenCalledWith(
+    expect(webApp.openMaxLink).not.toHaveBeenCalled();
+    expect(webApp.openLink).toHaveBeenCalledOnce();
+    expect(webApp.openLink).toHaveBeenCalledWith(
       'https://max.ru/se13560957_bot?start=manager_contact',
     );
     expect(browserOpen).not.toHaveBeenCalled();

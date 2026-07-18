@@ -250,6 +250,44 @@ describe('AdminPanel cursor pagination', () => {
   });
 });
 
+describe('AdminPanel contact and cross-device session handling', () => {
+  it('queues a clickable MAX contact through the bot instead of using a blocked mailto link', async () => {
+    const user = userEvent.setup();
+    const submission = makeSubmission(1);
+    mockAuthenticatedAdminData();
+    vi.spyOn(adminApi, 'listSubmissions').mockResolvedValue({
+      items: [submission],
+      nextCursor: null,
+    });
+    const queueContactHandoff = vi.spyOn(adminApi, 'queueContactHandoff').mockResolvedValue();
+
+    render(<AdminPanel initData="signed-init-data" onExit={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Заявки' }));
+    await user.click(await screen.findByRole('row', { name: /Клиент 1/ }));
+    expect(document.querySelector('a[href^="mailto:"]')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Написать в MAX' }));
+
+    await waitFor(() => {
+      expect(queueContactHandoff).toHaveBeenCalledWith(submission.submissionId);
+      expect(screen.getByRole('button', { name: 'Открыть чат с ботом' })).toBeTruthy();
+    });
+    expect(screen.getByText(/Контакт клиента отправлен в чат с ботом/)).toBeTruthy();
+  });
+
+  it('asks for the password again instead of showing zero applications when a cookie is blocked', async () => {
+    mockAuthenticatedAdminData();
+    vi.spyOn(adminApi, 'listSubmissions').mockRejectedValue(new AdminApiError(401, 'UNAUTHORIZED'));
+
+    render(<AdminPanel initData="signed-init-data" onExit={vi.fn()} />);
+
+    expect(await screen.findByRole('heading', { name: 'Вход в КРАФТ Control' })).toBeTruthy();
+    expect(screen.getByText(/Сессия не сохранилась на этом устройстве/)).toBeTruthy();
+    expect(screen.queryByText('Заявок пока нет')).toBeNull();
+  });
+});
+
 describe('AdminPanel content management', () => {
   it('updates, publishes, and deletes an existing bot welcome document', async () => {
     const user = userEvent.setup();

@@ -34,6 +34,10 @@ import type {
   AuthenticatedAdmin,
   CreatedAdminSession,
 } from './admin-repository.js';
+import {
+  AdminStoreActiveDialogNotFoundError,
+  AdminStoreNotFoundError,
+} from './admin-repository.js';
 import type { ValidatedMaxInitData, VerifiedMaxContact } from './max-auth.js';
 import type { AcceptedMaxWebhook } from './max-webhook.js';
 import type { AuthenticatedSession, Stage3Store } from './repository.js';
@@ -164,8 +168,10 @@ class StageStoreStub implements Stage3Store {
 
 class MemoryAdminStore implements AdminStore {
   public readonly createSessionSpy = vi.fn();
+  public readonly queueContactHandoffSpy = vi.fn();
   public readonly updateSubmissionSpy = vi.fn();
   public active = false;
+  public contactHandoffError: Error | null = null;
   public currentSubmission = submission;
   public content: AdminContentDocument | null = null;
   public users: readonly AdminUserListItem[] = [];
@@ -210,6 +216,14 @@ class MemoryAdminStore implements AdminStore {
   }
   public async getSubmission(id: string): Promise<AdminSubmissionListItem | null> {
     return id === this.currentSubmission.submissionId ? this.currentSubmission : null;
+  }
+  public async queueContactHandoff(
+    submissionId: string,
+    admin: AuthenticatedAdmin,
+    requestId: string,
+  ): Promise<void> {
+    this.queueContactHandoffSpy(submissionId, admin, requestId);
+    if (this.contactHandoffError !== null) throw this.contactHandoffError;
   }
   public async updateSubmission(
     id: string,
@@ -373,7 +387,7 @@ describe('admin API foundation', () => {
     await app.close();
   });
 
-  it('creates only an HttpOnly Strict session after password and command launch proof', async () => {
+  it('creates only a host-only HttpOnly session usable from the embedded MAX WebView', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/admin/auth/password',
@@ -388,7 +402,9 @@ describe('admin API foundation', () => {
     expect(response.headers['set-cookie']).toContain(`${ADMIN_SESSION_COOKIE}=${TOKEN}`);
     expect(response.headers['set-cookie']).toContain('Secure');
     expect(response.headers['set-cookie']).toContain('HttpOnly');
-    expect(response.headers['set-cookie']).toContain('SameSite=Strict');
+    expect(response.headers['set-cookie']).toContain('SameSite=None');
+    expect(response.headers['set-cookie']).toContain('Partitioned');
+    expect(response.headers['set-cookie']).not.toContain('Domain=');
 
     const anotherProfile = await app.inject({
       method: 'POST',
@@ -493,6 +509,73 @@ describe('admin API foundation', () => {
     expect(reviewUpdate.json()).toMatchObject({
       submission: { reviewStatus: 'in_review', adminNote: 'Перезвонить' },
     });
+  });
+
+  it('queues a MAX profile handoff only for a same-origin authenticated administrator', async () => {
+    store.active = true;
+    const cookie = `${ADMIN_SESSION_COOKIE}=${TOKEN}`;
+    const url = `/api/admin/submissions/${submission.submissionId}/contact-handoff`;
+
+    const withoutOrigin = await app.inject({ method: 'POST', url, headers: { cookie } });
+    expect(withoutOrigin.statusCode).toBe(403);
+    expect(store.queueContactHandoffSpy).not.toHaveBeenCalled();
+
+    const response = await app.inject({
+      method: 'POST',
+      url,
+      headers: { cookie, origin: ORIGIN },
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ queued: true });
+    expect(store.queueContactHandoffSpy).toHaveBeenCalledOnce();
+    expect(store.queueContactHandoffSpy.mock.calls[0]?.[0]).toBe(submission.submissionId);
+    expect(store.queueContactHandoffSpy.mock.calls[0]?.[1]).toMatchObject({
+      maxUserId: ADMIN_ID,
+    });
+  });
+
+  it('does not queue a contact handoff without a session and translates store failures', async () => {
+    const url = `/api/admin/submissions/${submission.submissionId}/contact-handoff`;
+    const headers = { origin: ORIGIN };
+
+    const unauthenticated = await app.inject({ method: 'POST', url, headers });
+    expect(unauthenticated.statusCode).toBe(401);
+    expect(store.queueContactHandoffSpy).not.toHaveBeenCalled();
+
+    store.active = true;
+    store.contactHandoffError = new AdminStoreNotFoundError();
+    const missing = await app.inject({
+      method: 'POST',
+      url,
+      headers: { ...headers, cookie: `${ADMIN_SESSION_COOKIE}=${TOKEN}` },
+    });
+    expect(missing.statusCode).toBe(404);
+
+    store.contactHandoffError = new AdminStoreActiveDialogNotFoundError();
+    const unavailable = await app.inject({
+      method: 'POST',
+      url,
+      headers: { ...headers, cookie: `${ADMIN_SESSION_COOKIE}=${TOKEN}` },
+    });
+    expect(unavailable.statusCode).toBe(409);
+    expect(ApiErrorResponseSchema.parse(unavailable.json()).error.code).toBe(
+      'CONTACT_HANDOFF_UNAVAILABLE',
+    );
+  });
+
+  it('clears the cross-site MAX WebView cookie on logout', async () => {
+    store.active = true;
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/logout',
+      headers: { cookie: `${ADMIN_SESSION_COOKIE}=${TOKEN}`, origin: ORIGIN },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers['set-cookie']).toContain('Max-Age=0');
+    expect(response.headers['set-cookie']).toContain('SameSite=None');
+    expect(response.headers['set-cookie']).toContain('Partitioned');
+    expect(response.headers['set-cookie']).not.toContain('Domain=');
   });
 
   it('returns bot-only identities through the same protected users endpoint', async () => {

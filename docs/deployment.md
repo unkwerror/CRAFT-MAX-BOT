@@ -91,7 +91,8 @@ store only the encoded `scrypt-v1` verifier. Never put the plaintext password in
 history, Git or logs. The value must be single-quoted in `.env` because its two `$` separators must
 remain literal. The deployment validates the verifier remotely without printing or copying it into
 the Mini App build. Changing the verifier and restarting the API invalidates all existing admin
-sessions. The API issues a server session through a `Secure`, `HttpOnly`, `SameSite=Strict` cookie
+sessions. The API issues a server session through a
+`Secure`, `HttpOnly`, `SameSite=None`, `Partitioned` cookie
 with the bounded `ADMIN_SESSION_TTL_SECONDS` TTL and limits password login to five attempts per IP
 in 15 minutes.
 

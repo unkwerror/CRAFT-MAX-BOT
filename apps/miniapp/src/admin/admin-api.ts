@@ -5,6 +5,7 @@ import {
   AdminCaseListResponseSchema,
   AdminCaseResponseSchema,
   AdminCaseUpdateRequestSchema,
+  AdminContactHandoffResponseSchema,
   AdminContentCreateRequestSchema,
   AdminContentListResponseSchema,
   AdminContentPublishRequestSchema,
@@ -170,6 +171,14 @@ export const adminApi = {
       { body: jsonBody(body), method: 'PATCH' },
     );
     return response.submission;
+  },
+
+  queueContactHandoff: async (submissionId: string): Promise<void> => {
+    await request(
+      `/api/admin/submissions/${encodeURIComponent(submissionId)}/contact-handoff`,
+      AdminContactHandoffResponseSchema,
+      { method: 'POST' },
+    );
   },
 
   listCases: async (): Promise<readonly AdminCase[]> =>

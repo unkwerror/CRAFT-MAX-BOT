@@ -46,6 +46,21 @@ describe('admin password API client', () => {
     });
   });
 
+  it('queues a MAX contact handoff through the protected admin session', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ queued: true }, 202));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await adminApi.queueContactHandoff('CRAFT72-000001');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/submissions/CRAFT72-000001/contact-handoff',
+      expect.objectContaining({
+        credentials: 'include',
+        method: 'POST',
+      }),
+    );
+  });
+
   it('preserves a server throttling response for the login form', async () => {
     vi.stubGlobal(
       'fetch',

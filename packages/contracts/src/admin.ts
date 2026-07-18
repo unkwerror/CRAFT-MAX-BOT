@@ -159,6 +159,11 @@ export const AdminSubmissionResponseSchema = z.strictObject({
 });
 export type AdminSubmissionResponse = z.infer<typeof AdminSubmissionResponseSchema>;
 
+export const AdminContactHandoffResponseSchema = z.strictObject({
+  queued: z.literal(true),
+});
+export type AdminContactHandoffResponse = z.infer<typeof AdminContactHandoffResponseSchema>;
+
 const AdminCaseFieldsSchema = z.strictObject({
   id: CaseIdSchema,
   title: z.string().trim().min(1).max(250),
