@@ -37,6 +37,7 @@ API_PORT=4100
 MAX_BOT_PUBLIC_NAME=se13560957_bot
 MAX_MANAGER_PROFILE_URL=https://max.ru/u/<COPIED_MANAGER_PROFILE_TOKEN>
 MAX_MANAGER_USER_ID=61096226
+MAX_MANAGER_DISPLAY_NAME='Иван Иванов'
 MAX_MANAGER_PHONE=+79220063645
 ADMIN_MAX_USER_IDS=61096226
 ADMIN_SESSION_TTL_SECONDS=28800
@@ -94,9 +95,10 @@ Apply `0005_admin_foundation.sql` before exposing the admin routes, and verify t
 before activation; its development rollback refuses to discard any admin-managed data.
 
 `MAX_MANAGER_PROFILE_URL` must be the exact personal link copied from the manager's MAX profile;
-it cannot be derived from the numeric user ID. The Mini App prefers this HTTPS link, then uses the
-configured phone as a fallback. MAX Bridge does not support `max://user/<id>` as a Mini App
-navigation URL.
+it cannot be derived from the numeric user ID. The Mini App prefers this HTTPS link, then opens the
+bot handoff and finally uses the configured phone as a fallback. `MAX_MANAGER_DISPLAY_NAME` must
+match the full name shown in MAX so the bot can render a supported clickable `max://user/<id>`
+mention. MAX Bridge does not support that scheme as a direct Mini App navigation URL.
 
 ### Install and verify ClamAV
 

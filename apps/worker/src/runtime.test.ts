@@ -87,6 +87,8 @@ function options(store: MemoryWorkerStore, fetch: typeof globalThis.fetch) {
   return {
     baseDelayMs: 1_000,
     leaseSeconds: 60,
+    managerDisplayName: 'Ivan Grishanow',
+    managerUserId: '347125190',
     maxApi: new MaxApiClient({ fetch, token: TOKEN }),
     maxAttempts: 8,
     maximumDelayMs: 300_000,
@@ -124,6 +126,38 @@ describe('Stage 4 worker cycle', () => {
       text: 'Добро пожаловать в КРАФТ!',
     });
     expect(store.completedWebhook?.actions[0]?.payload).toHaveProperty('attachments');
+  });
+
+  it('delivers the manager deep-link handoff with a clickable MAX user mention', async () => {
+    const store = new MemoryWorkerStore();
+    store.webhook = {
+      attempts: 1,
+      chatId: 182182182n,
+      eventKey: 'max:bot_started:manager-contact',
+      eventType: 'bot_started',
+      payload: {
+        chat_id: 182182182,
+        payload: 'manager_contact',
+        timestamp: NOW.getTime(),
+        update_type: 'bot_started',
+        user: { user_id: 123456789, first_name: 'Иван', is_bot: false },
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ message: { body: { mid: 'mid.manager' } } })),
+    );
+
+    await runWorkerCycle(options(store, fetchMock));
+
+    expect(store.completedWebhook?.actions[0]?.payload).toMatchObject({
+      format: 'markdown',
+      text: expect.stringContaining('[Ivan Grishanow](max://user/347125190)'),
+    });
+    const request = fetchMock.mock.calls[0]?.[1];
+    expect(JSON.parse(String(request?.body))).toMatchObject({
+      format: 'markdown',
+      text: expect.stringContaining('(max://user/347125190)'),
+    });
   });
 
   it.each([

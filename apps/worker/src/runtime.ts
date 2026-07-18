@@ -25,6 +25,8 @@ export interface BotWorkerOptions extends RetryPolicy {
   readonly leaseSeconds: number;
   readonly maxAttempts: number;
   readonly maxApi: MaxApiClient;
+  readonly managerDisplayName?: string;
+  readonly managerUserId?: string;
   readonly now?: () => Date;
   readonly pollIntervalMs: number;
   readonly store: BotWorkerStore;
@@ -149,7 +151,14 @@ export async function runWorkerCycle(
   if (webhook !== null) {
     try {
       const welcomeText = await loadWelcomeText(options);
-      const result = processWebhook(webhook, options.webApp, options.adminMaxUserIds, welcomeText);
+      const result = processWebhook(
+        webhook,
+        options.webApp,
+        options.adminMaxUserIds,
+        welcomeText,
+        options.managerUserId,
+        options.managerDisplayName,
+      );
       await options.store.completeWebhook(webhook, result, cycleNow);
     } catch (error) {
       await failWebhook(webhook, error, options, cycleNow);

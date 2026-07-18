@@ -416,7 +416,7 @@ test('all primary screens remain usable across viewport, theme and reduced-motio
   }
 });
 
-test('manager CTA uses only a supported MAX profile link or an explicit phone fallback', async ({
+test('manager CTA uses a supported MAX profile or bot handoff before the phone fallback', async ({
   browser,
 }, testInfo) => {
   test.skip(
@@ -443,7 +443,9 @@ test('manager CTA uses only a supported MAX profile link or an explicit phone fa
     } else {
       expect(state.maxLinks).toHaveLength(1);
       expect(state.browserOpenUrls.filter((url) => url.startsWith('tel:'))).toEqual([]);
-      expect(state.maxLinks[0]).not.toMatch(/_bot(?:[/?#]|$)/i);
+      expect(state.maxLinks[0]).toMatch(
+        /^https:\/\/max\.ru\/(?:u\/[A-Za-z0-9_-]+|[A-Za-z0-9_]+(?:\?start=manager_contact)?)$/,
+      );
     }
   } finally {
     await context.close();

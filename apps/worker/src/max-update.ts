@@ -25,6 +25,7 @@ export interface ParsedMaxUpdate {
   readonly messageId: string | null;
   readonly messageText: string | null;
   readonly raw: MaxJsonObject;
+  readonly startPayload: string | null;
   readonly timestampMs: number;
   readonly updateType: string;
 }
@@ -168,6 +169,7 @@ export function parseMaxUpdate(input: unknown): ParsedMaxUpdate {
   const messageId = stringField(body, 'mid') ?? stringField(raw, 'message_id');
   const callbackId = stringField(callback, 'callback_id');
   const callbackPayload = stringField(callback, 'payload');
+  const startPayload = updateType === 'bot_started' ? stringField(raw, 'payload') : null;
   const messageText = typeof body?.text === 'string' ? body.text : null;
   const actorIsBot = booleanField(actor, 'is_bot');
   const identity = eventIdentity(
@@ -190,6 +192,7 @@ export function parseMaxUpdate(input: unknown): ParsedMaxUpdate {
     messageId,
     messageText,
     raw,
+    startPayload,
     timestampMs,
     updateType,
   };

@@ -84,6 +84,8 @@ async function main(): Promise<void> {
           leaseSeconds: environment.BOT_WORKER_LEASE_SECONDS,
           log,
           maxApi,
+          managerDisplayName: environment.MAX_MANAGER_DISPLAY_NAME,
+          managerUserId: environment.MAX_MANAGER_USER_ID,
           maxAttempts: environment.BOT_WORKER_MAX_ATTEMPTS,
           maximumDelayMs: environment.BOT_RETRY_MAX_MS,
           pollIntervalMs: environment.BOT_WORKER_POLL_INTERVAL_MS,

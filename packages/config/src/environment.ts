@@ -101,6 +101,12 @@ export const serverEnvironmentSchema = z
       .trim()
       .regex(/^[1-9]\d{4,18}$/)
       .refine((value) => BigInt(value) <= 9_223_372_036_854_775_807n),
+    MAX_MANAGER_DISPLAY_NAME: concreteString('MAX_MANAGER_DISPLAY_NAME')
+      .max(128)
+      .regex(
+        /^[\p{L}\p{M}\p{N} .'-]+$/u,
+        'MAX_MANAGER_DISPLAY_NAME contains unsupported characters',
+      ),
     MAX_MANAGER_PHONE: z
       .string()
       .trim()

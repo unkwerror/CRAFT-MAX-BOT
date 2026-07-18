@@ -20,6 +20,7 @@ const validEnvironment = {
   MAX_BOT_PUBLIC_NAME: 'craft72_bot',
   MAX_MANAGER_PROFILE_URL: 'https://max.ru/u/Manager_token-123',
   MAX_MANAGER_USER_ID: '61096226',
+  MAX_MANAGER_DISPLAY_NAME: 'Иван Иванов',
   MAX_MANAGER_PHONE: '+79220063645',
   MAX_WEBHOOK_SECRET: 'a-random-webhook-secret-with-32-characters',
   MAX_API_TIMEOUT_MS: '10000',
@@ -111,6 +112,15 @@ describe('parseServerEnvironment', () => {
     expect(environment.ADMIN_MAX_USER_IDS).toEqual(['61096226', '9223372036854775807']);
     expect(environment.ADMIN_SESSION_TTL_SECONDS).toBe(28_800);
     expect(environment.MAX_MANAGER_PROFILE_URL).toBe('https://max.ru/u/Manager_token-123');
+    expect(environment.MAX_MANAGER_DISPLAY_NAME).toBe('Иван Иванов');
+  });
+
+  it('requires a safe manager display name for the MAX mention', () => {
+    for (const MAX_MANAGER_DISPLAY_NAME of ['', '[Иван](max://user/1)', 'x'.repeat(129)]) {
+      expect(() =>
+        parseServerEnvironment({ ...validEnvironment, MAX_MANAGER_DISPLAY_NAME }),
+      ).toThrow(ConfigurationError);
+    }
   });
 
   it('requires a unique MAX admin allowlist in production', () => {

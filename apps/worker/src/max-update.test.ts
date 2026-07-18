@@ -25,12 +25,25 @@ describe('parseMaxUpdate', () => {
       chatId: '-70801090403050',
       messageId: 'mid.ffffbdb48e6c3775019d496b34394b84',
       messageText: 'Нужен проект',
+      startPayload: null,
       timestampMs: 1_775_025_604_499,
       updateType: 'message_created',
     });
     expect(parsed.eventKey).toMatch(/^max:message_created:[a-f0-9]{64}$/);
     expect(parsed.raw.future_field).toEqual({ enabled: true });
     expect(parseMaxUpdate(messageCreated()).eventKey).toBe(parsed.eventKey);
+  });
+
+  it('extracts the official bot deep-link payload from bot_started', () => {
+    const parsed = parseMaxUpdate({
+      chat_id: 182_182_182,
+      payload: 'manager_contact',
+      timestamp: 1_775_025_604_500,
+      update_type: 'bot_started',
+      user: { user_id: 123_456_789, first_name: 'Иван', is_bot: false },
+    });
+
+    expect(parsed.startPayload).toBe('manager_contact');
   });
 
   it('uses callback_id rather than the bot-authored message as callback identity', () => {

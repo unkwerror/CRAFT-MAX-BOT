@@ -5,9 +5,14 @@ import { parseMaxUpdate } from './max-update.js';
 
 const WEB_APP = 'craft72_bot';
 
-const lifecycle = (updateType: 'bot_started' | 'bot_stopped', timestamp = 1_775_025_604_499) =>
+const lifecycle = (
+  updateType: 'bot_started' | 'bot_stopped',
+  timestamp = 1_775_025_604_499,
+  payload?: string,
+) =>
   parseMaxUpdate({
     chat_id: 182_182_182,
+    ...(payload === undefined ? {} : { payload }),
     timestamp,
     update_type: updateType,
     user: { user_id: 123_456_789, first_name: 'Иван', is_bot: false },
@@ -111,6 +116,52 @@ describe('planBotActions', () => {
     });
   });
 
+  it('turns the manager bot deep-link payload into a clickable MAX profile mention', () => {
+    const actions = planBotActions(lifecycle('bot_started', 1_775_025_604_499, 'manager_contact'), {
+      managerDisplayName: 'Ivan Grishanow',
+      managerUserId: '347125190',
+      webApp: WEB_APP,
+    });
+
+    expect(actions.map(({ kind }) => kind)).toEqual(['set_dialog_state', 'send_message']);
+    expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(false);
+    expect(actions[1]).toMatchObject({
+      body: {
+        format: 'markdown',
+        text: expect.stringContaining('[Ivan Grishanow](max://user/347125190)'),
+      },
+      kind: 'send_message',
+    });
+    expect((actions[1] as { body?: { attachments?: unknown } }).body?.attachments).toBeUndefined();
+  });
+
+  it.each(['/start manager_contact', '/start@craft72_bot manager_contact'])(
+    'supports the manager handoff command %s without creating an inquiry',
+    (command) => {
+      const actions = planBotActions(message(command), {
+        managerDisplayName: 'Ivan Grishanow',
+        managerUserId: '347125190',
+        webApp: WEB_APP,
+      });
+
+      expect(actions.map(({ kind }) => kind)).toEqual(['set_dialog_state', 'send_message']);
+      expect(JSON.stringify(actions)).toContain('max://user/347125190');
+      expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(false);
+    },
+  );
+
+  it('falls back to the normal welcome when a manager deep-link has no valid manager ID', () => {
+    const actions = planBotActions(lifecycle('bot_started', 1_775_025_604_499, 'manager_contact'), {
+      managerUserId: '0',
+      webApp: WEB_APP,
+    });
+
+    expect(JSON.stringify(actions)).not.toContain('max://user/');
+    expect(actions.find(({ kind }) => kind === 'send_message')).toMatchObject({
+      body: { text: expect.stringContaining('Я помощник проектного бюро КРАФТ') },
+    });
+  });
+
   it.each(['/id', '/id@craft72_bot'])(
     'answers %s with the current actor MAX ID without creating an inquiry',
     (command) => {
@@ -174,6 +225,24 @@ describe('planBotActions', () => {
     expect(send).toMatchObject({
       kind: 'send_message',
       body: { text: expect.stringContaining('менеджер КРАФТ получит обращение') },
+    });
+    expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(true);
+  });
+
+  it('answers manager contact with the configured clickable MAX profile', () => {
+    const actions = planBotActions(message('Связаться с менеджером'), {
+      managerDisplayName: 'Ivan Grishanow',
+      managerUserId: '347125190',
+      webApp: WEB_APP,
+    });
+    const send = actions.find(({ kind }) => kind === 'send_message');
+
+    expect(send).toMatchObject({
+      body: {
+        format: 'markdown',
+        text: expect.stringContaining('[Ivan Grishanow](max://user/347125190)'),
+      },
+      kind: 'send_message',
     });
     expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(true);
   });

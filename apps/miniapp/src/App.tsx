@@ -609,11 +609,23 @@ export const App = () => {
   );
 
   const handleOpenManagerChat = useCallback((): void => {
-    // MAX Bridge accepts only canonical https://max.ru links. A numeric user ID is not a profile URL.
+    // MAX Bridge accepts canonical https://max.ru links; numeric IDs work only in bot mentions.
     try {
       if (
         maxBotConfiguration.managerProfileUrl !== null &&
         maxBridge.openMaxLink(maxBotConfiguration.managerProfileUrl)
+      ) {
+        return;
+      }
+    } catch {
+      // Continue to the supported bot handoff.
+    }
+
+    try {
+      if (
+        maxBotConfiguration.url !== null &&
+        maxBotConfiguration.managerUserId !== null &&
+        maxBridge.openMaxLink(`${maxBotConfiguration.url}?start=manager_contact`)
       ) {
         return;
       }

@@ -103,11 +103,13 @@ set +a
 : "${MAX_BOT_PUBLIC_NAME:?}"
 : "${MAX_MANAGER_PROFILE_URL:=}"
 : "${MAX_MANAGER_USER_ID:?}"
+: "${MAX_MANAGER_DISPLAY_NAME:?}"
 : "${MAX_MANAGER_PHONE:?}"
 : "${ADMIN_MAX_USER_IDS:?}"
 [[ "${PRIVACY_POLICY_URL}" != *$'\n'* && "${CONSENT_VERSION}" != *$'\n'* && \
   "${MAX_BOT_PUBLIC_NAME}" != *$'\n'* && "${MAX_MANAGER_PROFILE_URL}" != *$'\n'* && \
   "${MAX_MANAGER_USER_ID}" != *$'\n'* && \
+  "${MAX_MANAGER_DISPLAY_NAME}" != *$'\n'* && \
   "${MAX_MANAGER_PHONE}" != *$'\n'* && "${ADMIN_MAX_USER_IDS}" != *$'\n'* ]] || exit 2
 
 valid_signed_max_id() {
@@ -117,6 +119,9 @@ valid_signed_max_id() {
 }
 
 valid_signed_max_id "${MAX_MANAGER_USER_ID}" && ((${#MAX_MANAGER_USER_ID} >= 5)) || exit 2
+((${#MAX_MANAGER_DISPLAY_NAME} >= 1 && ${#MAX_MANAGER_DISPLAY_NAME} <= 128)) || exit 2
+[[ "${MAX_MANAGER_DISPLAY_NAME}" != *'['* && "${MAX_MANAGER_DISPLAY_NAME}" != *']'* && \
+  "${MAX_MANAGER_DISPLAY_NAME}" != *'\\'* ]] || exit 2
 declare -A seen_admin_ids=()
 IFS=',' read -ra admin_ids <<<"${ADMIN_MAX_USER_IDS}"
 ((${#admin_ids[@]} >= 1 && ${#admin_ids[@]} <= 32)) || exit 2

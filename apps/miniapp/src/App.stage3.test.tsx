@@ -294,12 +294,12 @@ describe('App Stage 3 runtime', () => {
     expect(screen.getByText(/Профиль менеджера в MAX временно недоступен/)).toBeTruthy();
   });
 
-  it('does not treat a numeric MAX ID as a profile URL and uses the phone fallback', async () => {
+  it('uses the supported bot handoff for a numeric manager MAX ID before phone fallback', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
     vi.stubEnv('VITE_MAX_MANAGER_PROFILE_URL', '');
     vi.stubEnv('VITE_MAX_MANAGER_PHONE', '+79220063645');
-    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '61096226');
+    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '347125190');
     vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
     vi.stubEnv('VITE_CONSENT_VERSION', '');
     const webApp = installMaxBridge();
@@ -310,8 +310,11 @@ describe('App Stage 3 runtime', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /менеджер/i }));
 
-    expect(webApp.openMaxLink).not.toHaveBeenCalled();
-    expect(browserOpen).toHaveBeenCalledWith('tel:+79220063645', '_blank', 'noopener,noreferrer');
+    expect(webApp.openMaxLink).toHaveBeenCalledOnce();
+    expect(webApp.openMaxLink).toHaveBeenCalledWith(
+      'https://max.ru/se13560957_bot?start=manager_contact',
+    );
+    expect(browserOpen).not.toHaveBeenCalled();
     expect(webApp.close).not.toHaveBeenCalled();
   });
 
