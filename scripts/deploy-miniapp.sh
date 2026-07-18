@@ -101,25 +101,48 @@ set +a
 : "${PRIVACY_POLICY_URL:?}"
 : "${CONSENT_VERSION:?}"
 : "${MAX_BOT_PUBLIC_NAME:?}"
+: "${MAX_MANAGER_PROFILE_URL:=}"
 : "${MAX_MANAGER_USER_ID:?}"
 : "${MAX_MANAGER_PHONE:?}"
+: "${ADMIN_MAX_USER_IDS:?}"
 [[ "${PRIVACY_POLICY_URL}" != *$'\n'* && "${CONSENT_VERSION}" != *$'\n'* && \
-  "${MAX_BOT_PUBLIC_NAME}" != *$'\n'* && "${MAX_MANAGER_USER_ID}" != *$'\n'* && \
-  "${MAX_MANAGER_PHONE}" != *$'\n'* ]] || exit 2
-printf '%s\n%s\n%s\n%s\n%s\n' \
+  "${MAX_BOT_PUBLIC_NAME}" != *$'\n'* && "${MAX_MANAGER_PROFILE_URL}" != *$'\n'* && \
+  "${MAX_MANAGER_USER_ID}" != *$'\n'* && \
+  "${MAX_MANAGER_PHONE}" != *$'\n'* && "${ADMIN_MAX_USER_IDS}" != *$'\n'* ]] || exit 2
+
+valid_signed_max_id() {
+  local value="$1"
+  [[ "${value}" =~ ^[1-9][0-9]{0,18}$ ]] || return 1
+  [[ "${#value}" -lt 19 || "${value}" < "9223372036854775808" ]]
+}
+
+valid_signed_max_id "${MAX_MANAGER_USER_ID}" && ((${#MAX_MANAGER_USER_ID} >= 5)) || exit 2
+declare -A seen_admin_ids=()
+IFS=',' read -ra admin_ids <<<"${ADMIN_MAX_USER_IDS}"
+((${#admin_ids[@]} >= 1 && ${#admin_ids[@]} <= 32)) || exit 2
+for raw_admin_id in "${admin_ids[@]}"; do
+  admin_id="${raw_admin_id#"${raw_admin_id%%[![:space:]]*}"}"
+  admin_id="${admin_id%"${admin_id##*[![:space:]]}"}"
+  valid_signed_max_id "${admin_id}" || exit 2
+  [[ -z "${seen_admin_ids[${admin_id}]:-}" ]] || exit 2
+  seen_admin_ids["${admin_id}"]=1
+done
+unset admin_id admin_ids raw_admin_id seen_admin_ids
+printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
   "${PRIVACY_POLICY_URL}" "${CONSENT_VERSION}" "${MAX_BOT_PUBLIC_NAME}" \
-  "${MAX_MANAGER_USER_ID}" "${MAX_MANAGER_PHONE}"
+  "${MAX_MANAGER_PROFILE_URL}" "${MAX_MANAGER_USER_ID}" "${MAX_MANAGER_PHONE}"
 REMOTE_CONFIG
 )"; then
-  die "Could not read privacy URL, consent, bot name, manager id and phone from the server environment."
+  die "Could not validate the public settings and admin allowlist in the server environment."
 fi
 mapfile -t public_values <<<"${public_configuration}"
-[[ "${#public_values[@]}" -eq 5 ]] || die "Server public build settings are missing or malformed."
+[[ "${#public_values[@]}" -eq 6 ]] || die "Server public build settings are missing or malformed."
 PRIVACY_POLICY_URL="${public_values[0]}"
 CONSENT_VERSION="${public_values[1]}"
 MAX_BOT_PUBLIC_NAME="${public_values[2]}"
-MAX_MANAGER_USER_ID="${public_values[3]}"
-MAX_MANAGER_PHONE="${public_values[4]}"
+MAX_MANAGER_PROFILE_URL="${public_values[3]}"
+MAX_MANAGER_USER_ID="${public_values[4]}"
+MAX_MANAGER_PHONE="${public_values[5]}"
 unset public_configuration public_values
 
 [[ "${PRIVACY_POLICY_URL}" == "${PUBLIC_BASE_URL}/privacy.html" ]] ||
@@ -128,6 +151,8 @@ unset public_configuration public_values
   die "CONSENT_VERSION has an invalid format."
 [[ "${MAX_BOT_PUBLIC_NAME}" =~ ^[A-Za-z0-9_]+$ ]] ||
   die "MAX_BOT_PUBLIC_NAME has an invalid format."
+[[ -z "${MAX_MANAGER_PROFILE_URL}" || "${MAX_MANAGER_PROFILE_URL}" =~ ^https://max\.ru/(u/[A-Za-z0-9_-]{1,256}|[A-Za-z0-9_]{1,128})$ ]] ||
+  die "MAX_MANAGER_PROFILE_URL must be an exact https://max.ru manager profile link."
 [[ "${MAX_MANAGER_USER_ID}" =~ ^[1-9][0-9]{4,20}$ ]] ||
   die "MAX_MANAGER_USER_ID must be a numeric MAX user id."
 [[ "${MAX_MANAGER_PHONE}" =~ ^\+[1-9][0-9]{7,14}$ ]] ||
@@ -166,11 +191,12 @@ echo "Installing and building committed sources..."
   VITE_PRIVACY_POLICY_URL="${PRIVACY_POLICY_URL}" \
     VITE_CONSENT_VERSION="${CONSENT_VERSION}" \
     VITE_MAX_BOT_URL="${MAX_BOT_URL}" \
+    VITE_MAX_MANAGER_PROFILE_URL="${MAX_MANAGER_PROFILE_URL}" \
     VITE_MAX_MANAGER_USER_ID="${MAX_MANAGER_USER_ID}" \
     VITE_MAX_MANAGER_PHONE="${MAX_MANAGER_PHONE}" \
     corepack pnpm --filter @craft72/miniapp build
 )
-unset PRIVACY_POLICY_URL CONSENT_VERSION MAX_BOT_URL MAX_MANAGER_USER_ID MAX_MANAGER_PHONE
+unset PRIVACY_POLICY_URL CONSENT_VERSION MAX_BOT_URL MAX_MANAGER_PROFILE_URL MAX_MANAGER_USER_ID MAX_MANAGER_PHONE
 
 [[ -s "${REPOSITORY_ROOT}/apps/miniapp/dist/index.html" ]] || die "Mini App build did not produce index.html."
 [[ -s "${REPOSITORY_ROOT}/apps/miniapp/dist/privacy.html" ]] || die "Mini App build did not include privacy.html."

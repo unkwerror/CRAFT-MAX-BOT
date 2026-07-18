@@ -15,6 +15,8 @@ import {
 
 const DARK_THEME_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 const MAX_HOSTNAME = 'max.ru';
+const MAX_USER_ID_PATTERN = /^[1-9]\d{4,18}$/;
+const MAX_SIGNED_INT64_MAX = 9_223_372_036_854_775_807n;
 
 function noop(): void {
   return undefined;
@@ -102,6 +104,14 @@ function normalizeUrl(value: string, maxOnly: boolean): string {
   return url.toString();
 }
 
+function normalizeMaxUserId(value: string): string {
+  const normalized = value.trim();
+  if (!MAX_USER_ID_PATTERN.test(normalized) || BigInt(normalized) > MAX_SIGNED_INT64_MAX) {
+    throw new TypeError('Expected a valid MAX user ID');
+  }
+  return normalized;
+}
+
 export class MaxBridgeError extends Error {
   readonly code: string;
 
@@ -163,7 +173,7 @@ class MaxBridgeAdapterImpl implements MaxBridgeAdapter {
   }
 
   subscribeTheme(callback: (theme: MaxTheme) => void): Unsubscribe {
-    const cleanups: Array<() => void> = [];
+    const cleanups: (() => void)[] = [];
     const notify = (): void => {
       callback(this.getTheme());
     };
@@ -223,7 +233,7 @@ class MaxBridgeAdapterImpl implements MaxBridgeAdapter {
   }
 
   subscribeViewport(callback: (viewport: MaxViewportSize) => void): Unsubscribe {
-    const cleanups: Array<() => void> = [];
+    const cleanups: (() => void)[] = [];
     const notify = (): void => {
       callback(this.getBrowserViewportSize());
     };
@@ -231,9 +241,11 @@ class MaxBridgeAdapterImpl implements MaxBridgeAdapter {
     const webApp = this.getWebApp();
     if (typeof webApp?.onEvent === 'function') {
       const bridgeListener = (..._args: unknown[]): void => {
-        void this.getViewportSize().then(callback).catch(() => {
-          notify();
-        });
+        void this.getViewportSize()
+          .then(callback)
+          .catch(() => {
+            notify();
+          });
       };
 
       try {
@@ -406,6 +418,20 @@ class MaxBridgeAdapterImpl implements MaxBridgeAdapter {
 
   openMaxLink(value: string): boolean {
     return this.open(normalizeUrl(value, true), 'openMaxLink');
+  }
+
+  openMaxUserProfile(userId: string): boolean {
+    const nativeUrl = `max://user/${normalizeMaxUserId(userId)}`;
+    const webApp = this.getWebApp();
+    if (typeof webApp?.openMaxLink !== 'function') return false;
+
+    try {
+      webApp.openMaxLink(nativeUrl);
+      return true;
+    } catch {
+      // Native MAX user links must never fall through to a browser navigation.
+      return false;
+    }
   }
 
   openPhone(phoneE164: string): boolean {

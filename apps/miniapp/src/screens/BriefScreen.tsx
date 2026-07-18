@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { LeadDraftFormState } from '@craft72/contracts/source';
+import type { CaseCatalogItem, LeadDraftFormState } from '@craft72/contracts/source';
 
-import {
-  toggleDraftSelection,
-  validateBriefStep,
-  type BriefErrors,
-} from '../brief/draft.js';
+import { toggleDraftSelection, validateBriefStep, type BriefErrors } from '../brief/draft.js';
 import {
   ChoiceGrid,
   InlineNotice,
@@ -16,14 +12,10 @@ import {
 import { Icon } from '../components/Icon.js';
 import { Page, ProgressBar, ScreenHeader, StickyActions } from '../components/Layout.js';
 import {
-  MOCK_CONSENT_VERSION,
-  MOCK_CONTENT_NOTICE,
-  OBJECT_TYPE_OPTIONS,
-  PROJECT_STAGE_OPTIONS,
-  ROLE_OPTIONS,
-  SERVICE_OPTIONS,
-  TRI_STATE_OPTIONS,
-} from '../content.js';
+  DEFAULT_QUESTIONNAIRE_CONTENT,
+  type QuestionnaireContent,
+} from '../admin/questionnaire-content.js';
+import { MOCK_CONSENT_VERSION, MOCK_CONTENT_NOTICE, ROLE_OPTIONS } from '../content.js';
 import { MOCK_CASE_CATALOG } from '../domain/case-catalog.js';
 
 export const BRIEF_TOTAL_STEPS = 17;
@@ -35,92 +27,9 @@ interface BriefStepMeta {
   readonly subtitle: string;
 }
 
-export const BRIEF_STEP_META: Readonly<Record<BriefStep, BriefStepMeta>> = {
-  1: {
-    title: 'Ваша роль в проекте',
-    subtitle: 'Это поможет говорить о задаче в подходящем контексте.',
-  },
-  2: {
-    title: 'Представьтесь',
-    subtitle: 'Укажите имя и организацию, от которой вы обращаетесь.',
-  },
-  3: {
-    title: 'ИНН организации',
-    subtitle: 'Необязательное поле — его можно заполнить позднее.',
-  },
-  4: {
-    title: 'Тип объекта',
-    subtitle: 'Выберите наиболее близкий вариант.',
-  },
-  5: {
-    title: 'Где находится объект',
-    subtitle: 'Достаточно указать город или регион.',
-  },
-  6: {
-    title: 'Масштаб проекта',
-    subtitle: 'Один объект или портфель из нескольких объектов.',
-  },
-  7: {
-    title: 'Площадь объекта',
-    subtitle: 'Если точной площади ещё нет, это можно отметить.',
-  },
-  8: {
-    title: 'Текущая стадия',
-    subtitle: 'На каком этапе проект находится сейчас?',
-  },
-  9: {
-    title: 'Какие услуги нужны',
-    subtitle: 'Можно выбрать несколько направлений.',
-  },
-  10: {
-    title: 'Экспертиза и статус ОКН',
-    subtitle: 'Ответ «Пока не знаю» тоже подходит.',
-  },
-  11: {
-    title: 'Желаемое начало работ',
-    subtitle: 'Укажите ориентир или отметьте, что дата пока неизвестна.',
-  },
-  12: {
-    title: 'Расскажите о задаче',
-    subtitle: 'Коротко опишите объект, исходную ситуацию и ожидаемый результат.',
-  },
-  13: {
-    title: 'Материалы и ссылки',
-    subtitle: 'Добавьте документы либо HTTPS-ссылки, если они уже есть.',
-  },
-  14: {
-    title: 'Телефон для связи',
-    subtitle: 'Можно передать контакт из MAX или ввести номер вручную.',
-  },
-  15: {
-    title: 'Электронная почта',
-    subtitle: 'На этот адрес можно будет отправлять материалы по проекту.',
-  },
-  16: {
-    title: 'Согласие на обработку данных',
-    subtitle:
-      'Подтвердите согласие на обработку данных этой заявки — это нужно для отправки, а не повторное принятие условий сервиса.',
-  },
-  17: {
-    title: 'Анкета заполнена',
-    subtitle: 'Все разделы заполнены. Осталось открыть итоговое резюме и отправить заявку.',
-  },
-};
-
-const SCOPE_OPTIONS = [
-  { label: 'Один объект', value: 'single_object' },
-  { label: 'Портфель объектов', value: 'portfolio' },
-] as const;
-
-const AREA_STATUS_OPTIONS = [
-  { label: 'Площадь известна', value: 'known' },
-  { label: 'Пока не знаю', value: 'unknown' },
-] as const;
-
-const START_STATUS_OPTIONS = [
-  { label: 'Есть ориентир по дате', value: 'known' },
-  { label: 'Пока не знаю', value: 'unknown' },
-] as const;
+export const BRIEF_STEP_META = DEFAULT_QUESTIONNAIRE_CONTENT.steps as Readonly<
+  Record<BriefStep, BriefStepMeta>
+>;
 
 const errorProps = (error: string | undefined) => (error === undefined ? {} : { error });
 
@@ -132,6 +41,7 @@ const STEP_17_CHECKLIST = [
 ] as const;
 
 interface BriefStepFieldsProps {
+  readonly caseCatalog: readonly CaseCatalogItem[];
   readonly consentVersion: string;
   readonly draft: LeadDraftFormState;
   readonly errors: BriefErrors;
@@ -141,12 +51,14 @@ interface BriefStepFieldsProps {
   readonly onRequestContact?: () => void | Promise<void>;
   readonly phoneVerified: boolean;
   readonly privacyPolicyUrl?: string;
+  readonly questionnaire: QuestionnaireContent;
   readonly requestingContact: boolean;
   readonly serverBacked: boolean;
   readonly step: BriefStep;
 }
 
 const BriefStepFields = ({
+  caseCatalog,
   consentVersion,
   draft,
   errors,
@@ -156,6 +68,7 @@ const BriefStepFields = ({
   onRequestContact,
   phoneVerified,
   privacyPolicyUrl,
+  questionnaire,
   requestingContact,
   serverBacked,
   step,
@@ -171,7 +84,10 @@ const BriefStepFields = ({
           columns={2}
           {...errorProps(errors.role)}
           onChange={(role) => update({ role })}
-          options={ROLE_OPTIONS}
+          options={questionnaire.options.roles.map((option) => {
+            const icon = ROLE_OPTIONS.find(({ value }) => value === option.value)?.icon;
+            return { ...option, ...(icon === undefined ? {} : { icon }) };
+          })}
           value={draft.role}
         />
       );
@@ -219,7 +135,7 @@ const BriefStepFields = ({
           columns={2}
           {...errorProps(errors.objectType)}
           onChange={(objectType) => update({ objectType })}
-          options={OBJECT_TYPE_OPTIONS}
+          options={questionnaire.options.objectTypes}
           value={draft.objectType}
         />
       );
@@ -259,7 +175,7 @@ const BriefStepFields = ({
                     : { kind },
               })
             }
-            options={SCOPE_OPTIONS}
+            options={questionnaire.options.scope}
             value={draft.scope?.kind}
           />
           {draft.scope?.kind === 'portfolio' ? (
@@ -291,7 +207,7 @@ const BriefStepFields = ({
                     : { status },
               })
             }
-            options={AREA_STATUS_OPTIONS}
+            options={questionnaire.options.areaStatus}
             value={draft.area?.status}
           />
           {draft.area?.status === 'known' ? (
@@ -315,7 +231,7 @@ const BriefStepFields = ({
         <ChoiceGrid
           {...errorProps(errors.currentStage)}
           onChange={(currentStage) => update({ currentStage })}
-          options={PROJECT_STAGE_OPTIONS}
+          options={questionnaire.options.projectStages}
           value={draft.currentStage}
         />
       );
@@ -329,7 +245,7 @@ const BriefStepFields = ({
           onChange={(service) =>
             update({ services: toggleDraftSelection(draft.services, service) })
           }
-          options={SERVICE_OPTIONS}
+          options={questionnaire.options.services}
           value={draft.services}
         />
       );
@@ -341,14 +257,14 @@ const BriefStepFields = ({
             {...errorProps(errors.expertiseRequired)}
             label="Потребуется экспертиза?"
             onChange={(expertiseRequired) => update({ expertiseRequired })}
-            options={TRI_STATE_OPTIONS}
+            options={questionnaire.options.triState}
             value={draft.expertiseRequired}
           />
           <ChoiceGrid
             {...errorProps(errors.culturalHeritageSite)}
             label="Объект относится к культурному наследию?"
             onChange={(culturalHeritageSite) => update({ culturalHeritageSite })}
-            options={TRI_STATE_OPTIONS}
+            options={questionnaire.options.triState}
             value={draft.culturalHeritageSite}
           />
         </>
@@ -367,7 +283,7 @@ const BriefStepFields = ({
                     : { status },
               })
             }
-            options={START_STATUS_OPTIONS}
+            options={questionnaire.options.startStatus}
             value={draft.desiredStart?.status}
           />
           {draft.desiredStart?.status === 'known' ? (
@@ -399,9 +315,7 @@ const BriefStepFields = ({
 
     case 13: {
       const links = draft.links?.length === 0 || draft.links === undefined ? [''] : draft.links;
-      const selectedCases = MOCK_CASE_CATALOG.filter((item) =>
-        draft.selectedCaseIds?.includes(item.id),
-      );
+      const selectedCases = caseCatalog.filter((item) => draft.selectedCaseIds?.includes(item.id));
       const setLink = (index: number, value: string): void => {
         const next = [...(draft.links ?? [])];
         if (index >= next.length) next.push(value);
@@ -578,9 +492,7 @@ const BriefStepFields = ({
         <>
           <InlineNotice icon="check" tone="success">
             <strong>Все разделы заполнены</strong>
-            <span>
-              Нажмите «К проверке», чтобы открыть итоговое резюме и отправить заявку.
-            </span>
+            <span>Нажмите «К проверке», чтобы открыть итоговое резюме и отправить заявку.</span>
           </InlineNotice>
           <div className="chip-list" aria-label="Заполненные разделы">
             {STEP_17_CHECKLIST.map((item) => (
@@ -601,6 +513,7 @@ const BriefStepFields = ({
 };
 
 export interface BriefScreenProps {
+  readonly caseCatalog?: readonly CaseCatalogItem[];
   readonly consentVersion?: string;
   readonly draft: LeadDraftFormState;
   readonly isSaving?: boolean;
@@ -614,6 +527,7 @@ export interface BriefScreenProps {
   readonly onSaveAndExit: (draft: LeadDraftFormState) => void | Promise<void>;
   readonly phoneVerified?: boolean;
   readonly privacyPolicyUrl?: string;
+  readonly questionnaire?: QuestionnaireContent;
   readonly requestingContact?: boolean;
   readonly saveStatus?: 'idle' | 'saving' | 'saved' | 'error';
   readonly saveStatusText?: string;
@@ -632,6 +546,7 @@ function saveStatusLabel(
 }
 
 export const BriefScreen = ({
+  caseCatalog = MOCK_CASE_CATALOG,
   consentVersion = MOCK_CONSENT_VERSION,
   draft,
   isSaving = false,
@@ -644,6 +559,7 @@ export const BriefScreen = ({
   onSaveAndExit,
   phoneVerified = false,
   privacyPolicyUrl,
+  questionnaire = DEFAULT_QUESTIONNAIRE_CONTENT,
   requestingContact = false,
   saveStatus,
   saveStatusText,
@@ -652,7 +568,7 @@ export const BriefScreen = ({
 }: BriefScreenProps) => {
   const [errors, setErrors] = useState<BriefErrors>({});
   const stepHeadingRef = useRef<HTMLHeadingElement>(null);
-  const meta = BRIEF_STEP_META[step];
+  const meta = questionnaire.steps[String(step)] ?? BRIEF_STEP_META[step];
   const statusLine = saveStatusLabel(saveStatus, saveStatusText);
 
   useEffect(() => {
@@ -713,6 +629,7 @@ export const BriefScreen = ({
           <p className="form-card__subtitle">{meta.subtitle}</p>
           <div className="form-stack">
             <BriefStepFields
+              caseCatalog={caseCatalog}
               consentVersion={consentVersion}
               draft={draft}
               errors={errors}
@@ -722,6 +639,7 @@ export const BriefScreen = ({
               {...(onRequestContact === undefined ? {} : { onRequestContact })}
               phoneVerified={phoneVerified}
               {...(privacyPolicyUrl === undefined ? {} : { privacyPolicyUrl })}
+              questionnaire={questionnaire}
               requestingContact={requestingContact}
               serverBacked={serverBacked}
               step={step}

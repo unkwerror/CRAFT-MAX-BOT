@@ -90,9 +90,9 @@ describe('validateMaxInitData', () => {
     ).toThrow(/future/i);
   });
 
-  it('ignores a signed but unsupported start parameter', () => {
+  it('accepts the signed administrative start parameter for downstream authorization', () => {
     expect(validateMaxInitData(validInitData({ start_param: 'admin' }), options).startParam).toBe(
-      null,
+      'admin',
     );
   });
 });

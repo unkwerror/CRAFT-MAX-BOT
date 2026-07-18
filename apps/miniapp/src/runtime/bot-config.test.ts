@@ -6,13 +6,13 @@ describe('MAX bot runtime configuration', () => {
   it('accepts an exact public MAX bot link', () => {
     expect(resolveMaxBotConfiguration({ VITE_MAX_BOT_URL: 'https://max.ru/craft72_bot' })).toEqual({
       url: 'https://max.ru/craft72_bot',
-      managerUrl: null,
+      managerProfileUrl: null,
       managerUserId: null,
       managerPhone: null,
     });
   });
 
-  it('builds a manager deep-link from a numeric MAX user id', () => {
+  it('keeps a numeric MAX user id only for the native profile fallback', () => {
     expect(
       resolveMaxBotConfiguration({
         VITE_MAX_BOT_URL: 'https://max.ru/se13560957_bot',
@@ -21,10 +21,22 @@ describe('MAX bot runtime configuration', () => {
     ).toEqual({
       url: 'https://max.ru/se13560957_bot',
       managerUserId: '61096226',
-      managerUrl: 'https://max.ru/61096226',
+      managerProfileUrl: null,
       managerPhone: null,
     });
   });
+
+  it.each(['https://max.ru/craft_manager', 'https://max.ru/u/AbC_def-0123456789'])(
+    'accepts a canonical copied manager profile link: %s',
+    (value) => {
+      expect(resolveMaxBotConfiguration({ VITE_MAX_MANAGER_PROFILE_URL: value })).toEqual({
+        url: null,
+        managerProfileUrl: value,
+        managerUserId: null,
+        managerPhone: null,
+      });
+    },
+  );
 
   it('accepts a manager phone in E.164 and normalizes 8… local form', () => {
     expect(
@@ -43,7 +55,7 @@ describe('MAX bot runtime configuration', () => {
   it('keeps the manager link disabled when the setting is absent', () => {
     expect(resolveMaxBotConfiguration({})).toEqual({
       url: null,
-      managerUrl: null,
+      managerProfileUrl: null,
       managerUserId: null,
       managerPhone: null,
     });
@@ -61,13 +73,13 @@ describe('MAX bot runtime configuration', () => {
   ])('rejects a non-canonical or unsafe link: %s', (value) => {
     expect(resolveMaxBotConfiguration({ VITE_MAX_BOT_URL: value })).toEqual({
       url: null,
-      managerUrl: null,
+      managerProfileUrl: null,
       managerUserId: null,
       managerPhone: null,
     });
   });
 
-  it.each(['0', 'abc', '12', '61096226;', '61096226/extra'])(
+  it.each(['0', 'abc', '12', '61096226;', '61096226/extra', '9223372036854775808'])(
     'rejects an unsafe manager user id: %s',
     (value) => {
       expect(
@@ -77,12 +89,30 @@ describe('MAX bot runtime configuration', () => {
         }),
       ).toEqual({
         url: 'https://max.ru/se13560957_bot',
-        managerUrl: null,
+        managerProfileUrl: null,
         managerUserId: null,
         managerPhone: null,
       });
     },
   );
+
+  it.each([
+    'http://max.ru/craft_manager',
+    'https://user:secret@max.ru/craft_manager',
+    'https://max.ru:443/craft_manager',
+    'https://max.ru/u/',
+    'https://max.ru/u/token/extra',
+    'https://max.ru/craft-manager',
+    'https://max.ru/craft_manager/',
+    'https://max.ru/craft_manager?chat=1',
+    'https://max.ru/craft_manager#profile',
+    'https://max.ru.evil.example/craft_manager',
+    'https://max.ru/%63raft_manager',
+  ])('rejects a non-canonical or unsafe manager profile link: %s', (value) => {
+    expect(
+      resolveMaxBotConfiguration({ VITE_MAX_MANAGER_PROFILE_URL: value }).managerProfileUrl,
+    ).toBeNull();
+  });
 
   it.each(['123', '++7922', 'not-a-phone', '79220063645x'])(
     'rejects an unsafe manager phone: %s',

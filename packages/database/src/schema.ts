@@ -43,6 +43,21 @@ export const submissionStatusEnum = pgEnum('submission_status', [
   'cancelled',
 ]);
 
+export const submissionReviewStatusEnum = pgEnum('submission_review_status', [
+  'new',
+  'in_review',
+  'contacted',
+  'qualified',
+  'closed',
+  'rejected',
+]);
+
+export const contentDocumentKindEnum = pgEnum('content_document_kind', [
+  'questionnaire',
+  'miniapp',
+  'bot',
+]);
+
 export const documentScanStatusEnum = pgEnum('document_scan_status', [
   'pending',
   'scanning',
@@ -300,6 +315,8 @@ export const submissions = pgTable(
     termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }).notNull(),
     source: varchar('source', { length: 128 }).default('direct').notNull(),
     status: submissionStatusEnum('status').default('received').notNull(),
+    reviewStatus: submissionReviewStatusEnum('review_status').default('new').notNull(),
+    adminNote: text('admin_note'),
     trackerCrmKey: varchar('tracker_crm_key', { length: 64 }),
     trackerPartKey: varchar('tracker_part_key', { length: 64 }),
     trackerDocsKey: varchar('tracker_docs_key', { length: 64 }),
@@ -317,6 +334,7 @@ export const submissions = pgTable(
     index('submissions_pending_sync_idx')
       .on(table.status, table.createdAt)
       .where(sql`${table.status} in ('received', 'syncing', 'sync_failed')`),
+    index('submissions_review_queue_idx').on(table.reviewStatus, table.createdAt),
     uniqueIndex('submissions_tracker_crm_key_uidx')
       .on(table.trackerCrmKey)
       .where(sql`${table.trackerCrmKey} is not null`),
@@ -368,6 +386,10 @@ export const submissions = pgTable(
       sql`char_length(btrim(${table.consentVersion})) > 0`,
     ),
     check('submissions_source_not_blank', sql`char_length(btrim(${table.source})) > 0`),
+    check(
+      'submissions_admin_note_not_blank',
+      sql`${table.adminNote} is null or char_length(btrim(${table.adminNote})) > 0`,
+    ),
   ],
 );
 
@@ -918,12 +940,177 @@ export const integrationOutbox = pgTable(
   ],
 );
 
+export const adminSessions = pgTable(
+  'admin_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    maxUserId: bigint('max_user_id', { mode: 'bigint' })
+      .notNull()
+      .references(() => maxUsers.maxUserId, {
+        onDelete: 'cascade',
+        onUpdate: 'cascade',
+      }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_sessions_token_hash_unique').on(table.tokenHash),
+    index('admin_sessions_active_user_expiry_idx')
+      .on(table.maxUserId, table.expiresAt)
+      .where(sql`${table.revokedAt} is null`),
+    index('admin_sessions_expires_at_idx').on(table.expiresAt),
+    check('admin_sessions_token_hash_format', sql`${table.tokenHash} ~ '^[0-9a-f]{64}$'`),
+    check('admin_sessions_expiry_after_creation', sql`${table.expiresAt} > ${table.createdAt}`),
+    check(
+      'admin_sessions_revocation_after_creation',
+      sql`${table.revokedAt} is null or ${table.revokedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
+export const caseCatalogItems = pgTable(
+  'case_catalog_items',
+  {
+    id: varchar('id', { length: 64 }).primaryKey(),
+    title: varchar('title', { length: 250 }).notNull(),
+    url: text('url').notNull(),
+    image: text('image'),
+    city: varchar('city', { length: 200 }).notNull(),
+    region: varchar('region', { length: 200 }).notNull(),
+    categories: text('categories').array().notNull(),
+    services: text('services').array().notNull(),
+    areaSqm: numeric('area_sqm', { precision: 14, scale: 2 }),
+    scale: varchar('scale', { length: 64 }),
+    constructionKind: varchar('construction_kind', { length: 64 }),
+    status: varchar('status', { length: 80 }).notNull(),
+    tags: text('tags').array().default(emptyTextArray).notNull(),
+    published: boolean('published').default(false).notNull(),
+    sortOrder: integer('sort_order').default(0).notNull(),
+    version: integer('version').default(1).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('case_catalog_items_public_order_idx')
+      .on(table.sortOrder, table.id)
+      .where(sql`${table.published} = true`),
+    check('case_catalog_items_id_format', sql`${table.id} ~ '^[a-z0-9][a-z0-9_-]{0,63}$'`),
+    check('case_catalog_items_title_not_blank', sql`char_length(btrim(${table.title})) > 0`),
+    check('case_catalog_items_url_https', sql`${table.url} ~ '^https://'`),
+    check(
+      'case_catalog_items_image_https',
+      sql`${table.image} is null or ${table.image} ~ '^https://'`,
+    ),
+    check('case_catalog_items_city_not_blank', sql`char_length(btrim(${table.city})) > 0`),
+    check('case_catalog_items_region_not_blank', sql`char_length(btrim(${table.region})) > 0`),
+    check('case_catalog_items_categories_not_empty', sql`cardinality(${table.categories}) > 0`),
+    check('case_catalog_items_services_not_empty', sql`cardinality(${table.services}) > 0`),
+    check(
+      'case_catalog_items_area_positive',
+      sql`${table.areaSqm} is null or ${table.areaSqm} > 0`,
+    ),
+    check('case_catalog_items_status_not_blank', sql`char_length(btrim(${table.status})) > 0`),
+    check('case_catalog_items_version_positive', sql`${table.version} > 0`),
+  ],
+);
+
+export const contentDocuments = pgTable(
+  'content_documents',
+  {
+    key: varchar('key', { length: 64 }).primaryKey(),
+    kind: contentDocumentKindEnum('kind').notNull(),
+    draft: jsonb('draft').$type<JsonObject>().default(emptyJsonObject).notNull(),
+    published: jsonb('published').$type<JsonObject>(),
+    version: integer('version').default(1).notNull(),
+    publishedVersion: integer('published_version'),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('content_documents_kind_idx').on(table.kind, table.updatedAt),
+    check('content_documents_key_format', sql`${table.key} ~ '^[a-z0-9][a-z0-9_-]{0,63}$'`),
+    check('content_documents_draft_object', sql`jsonb_typeof(${table.draft}) = 'object'`),
+    check(
+      'content_documents_published_object',
+      sql`${table.published} is null or jsonb_typeof(${table.published}) = 'object'`,
+    ),
+    check('content_documents_version_positive', sql`${table.version} > 0`),
+    check(
+      'content_documents_published_consistent',
+      sql`(${table.published} is null and ${table.publishedVersion} is null and ${table.publishedAt} is null)
+        or (${table.published} is not null and ${table.publishedVersion} is not null
+          and ${table.publishedVersion} > 0 and ${table.publishedVersion} <= ${table.version}
+          and ${table.publishedAt} is not null)`,
+    ),
+  ],
+);
+
+export const adminAuditLog = pgTable(
+  'admin_audit_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    actorMaxUserId: bigint('actor_max_user_id', { mode: 'bigint' })
+      .notNull()
+      .references(() => maxUsers.maxUserId, {
+        onDelete: 'restrict',
+        onUpdate: 'cascade',
+      }),
+    action: varchar('action', { length: 80 }).notNull(),
+    targetType: varchar('target_type', { length: 80 }).notNull(),
+    targetId: varchar('target_id', { length: 128 }).notNull(),
+    requestId: varchar('request_id', { length: 128 }).notNull(),
+    metadata: jsonb('metadata').$type<JsonObject>().default(emptyJsonObject).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('admin_audit_log_actor_created_idx').on(table.actorMaxUserId, table.createdAt),
+    index('admin_audit_log_target_created_idx').on(
+      table.targetType,
+      table.targetId,
+      table.createdAt,
+    ),
+    check('admin_audit_log_action_not_blank', sql`char_length(btrim(${table.action})) > 0`),
+    check(
+      'admin_audit_log_target_type_not_blank',
+      sql`char_length(btrim(${table.targetType})) > 0`,
+    ),
+    check('admin_audit_log_target_id_not_blank', sql`char_length(btrim(${table.targetId})) > 0`),
+    check('admin_audit_log_request_id_not_blank', sql`char_length(btrim(${table.requestId})) > 0`),
+    check('admin_audit_log_metadata_object', sql`jsonb_typeof(${table.metadata}) = 'object'`),
+  ],
+);
+
 export const maxUsersRelations = relations(maxUsers, ({ many }) => ({
   sessions: many(sessions),
   leadDrafts: many(leadDrafts),
   submissions: many(submissions),
   documents: many(documents),
   uploadSessions: many(uploadSessions),
+  adminSessions: many(adminSessions),
+  adminAuditEntries: many(adminAuditLog),
+}));
+
+export const adminSessionsRelations = relations(adminSessions, ({ one }) => ({
+  maxUser: one(maxUsers, {
+    fields: [adminSessions.maxUserId],
+    references: [maxUsers.maxUserId],
+  }),
+}));
+
+export const adminAuditLogRelations = relations(adminAuditLog, ({ one }) => ({
+  actor: one(maxUsers, {
+    fields: [adminAuditLog.actorMaxUserId],
+    references: [maxUsers.maxUserId],
+  }),
 }));
 
 export const botDialogsRelations = relations(botDialogs, ({ many }) => ({

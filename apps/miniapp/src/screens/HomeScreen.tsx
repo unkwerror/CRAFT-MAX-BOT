@@ -13,25 +13,19 @@ interface HomeAction {
 
 const actions: readonly HomeAction[] = [
   {
-    description: 'Ответьте на вопросы — прогресс сохранится',
-    icon: 'brief',
-    label: 'Заполнить анкету',
-    route: 'brief',
-  },
-  {
-    description: 'Короткая подсказка, какая услуга подойдёт',
+    description: '6 вопросов и понятная рекомендация',
     icon: 'compass',
     label: 'Подобрать услугу',
     route: 'finder',
   },
   {
-    description: 'Примеры реализованных объектов',
+    description: 'Реализованные объекты и масштабы',
     icon: 'projects',
     label: 'Посмотреть проекты',
     route: 'cases',
   },
   {
-    description: 'Файлы, ссылки и материалы к задаче',
+    description: 'ТЗ, планы, ссылки и другие файлы',
     icon: 'upload',
     label: 'Отправить материалы',
     route: 'upload',
@@ -40,18 +34,20 @@ const actions: readonly HomeAction[] = [
 
 const howItWorks: readonly { readonly title: string; readonly text: string }[] = [
   {
-    title: 'Расскажите о задаче',
-    text: 'Короткая анкета: объект, цель и контакты.',
+    title: 'Заполните короткий бриф',
+    text: 'Можно пропустить необязательное и вернуться позже.',
   },
   {
-    title: 'При желании добавьте материалы',
-    text: 'Проекты, файлы ТЗ или ссылки — не обязательно сразу.',
+    title: 'Добавьте материалы',
+    text: 'Если они уже есть — файлы и ссылки попадут в ту же заявку.',
   },
   {
-    title: 'Менеджер свяжется с вами',
-    text: 'Ответ придёт в MAX — обычно в ближайшее время.',
+    title: 'Получите следующий шаг',
+    text: 'Менеджер изучит вводные и ответит в вашем чате MAX.',
   },
 ];
+
+const heroFacts = ['7–10 минут', 'Черновик сохраняется', 'Ответ в MAX'] as const;
 
 export interface HomeScreenProps {
   readonly draftStep: number | null;
@@ -84,16 +80,24 @@ export const HomeScreen = ({
       <section className="hero hero--friendly">
         <div className="hero__content">
           <span className="hero__eyebrow hero__eyebrow--soft">
-            <b>КРАФТ</b>
-            Архитектура и проектирование
+            <b>КРАФТ / 72</b>
+            Проектное бюро · Тюмень
           </span>
           <h1>
-            Расскажите о проекте —
-            <em> мы подскажем, с чего начать</em>
+            Расскажите о проекте —<em> соберём ясный первый шаг</em>
           </h1>
           <p>
-            Заполните анкету или напишите менеджеру. Можно сохранить ответы и вернуться позже.
+            Не нужно готовить идеальное ТЗ. Ответьте на понятные вопросы, а мы поможем определить
+            состав работ и следующий шаг.
           </p>
+          <ul aria-label="Преимущества анкеты" className="hero__facts">
+            {heroFacts.map((fact) => (
+              <li key={fact}>
+                <Icon name="check" size={14} />
+                {fact}
+              </li>
+            ))}
+          </ul>
           <div className="hero__actions">
             <Button
               className="hero__primary"
@@ -106,23 +110,37 @@ export const HomeScreen = ({
             </Button>
             <Button
               className="hero__secondary"
+              iconAfter={<Icon name="chat" size={18} />}
               mode="secondary"
-              onClick={() => onNavigate('cases')}
+              onClick={onSupport}
               size="large"
               type="button"
             >
-              Смотреть проекты
+              Связаться с менеджером
             </Button>
           </div>
+          <button
+            className="hero__portfolio-link"
+            onClick={() => onNavigate('cases')}
+            type="button"
+          >
+            Смотреть проекты <Icon name="arrow" size={17} />
+          </button>
         </div>
         <figure className="hero__media">
           <img
             alt="Деловой дом — проект КРАФТ в Тюмени"
             src="/portfolio/business-center-tyumen.jpg"
           />
+          <span className="hero__media-kicker">Выбранный проект</span>
           <figcaption>
-            <span>Тюмень · 42 000 м²</span>
-            <strong>Деловой дом</strong>
+            <span>
+              <strong>Деловой дом</strong>
+              Тюмень · 42 000 м²
+            </span>
+            <span className="hero__media-arrow" aria-hidden="true">
+              <Icon name="arrow" size={18} />
+            </span>
           </figcaption>
         </figure>
       </section>
@@ -130,36 +148,14 @@ export const HomeScreen = ({
       <section className="home-actions">
         <div className="section-heading">
           <div>
-            <span className="section-heading__index">Как это работает</span>
-            <h2>Три простых шага</h2>
-            <p>Без сложных терминов — только нужное для заявки</p>
-          </div>
-        </div>
-
-        <ol className="how-steps">
-          {howItWorks.map((step, index) => (
-            <li className="how-steps__item" key={step.title}>
-              <span className="how-steps__num" aria-hidden="true">
-                {index + 1}
-              </span>
-              <div>
-                <strong>{step.title}</strong>
-                <small>{step.text}</small>
-              </div>
-            </li>
-          ))}
-        </ol>
-
-        <div className="section-heading">
-          <div>
-            <span className="section-heading__index">С чего начать</span>
-            <h2>Выберите действие</h2>
-            <p>Любой путь можно сменить позже</p>
+            <span className="section-heading__index">Быстрый маршрут</span>
+            <h2>Что хотите сделать?</h2>
+            <p>Выберите удобную точку входа — всё останется в одной заявке</p>
           </div>
         </div>
 
         <div className="action-grid action-grid--friendly">
-          {actions.map((action) => (
+          {actions.map((action, index) => (
             <button
               className="action-card action-card--friendly"
               key={action.label}
@@ -173,6 +169,7 @@ export const HomeScreen = ({
                 <Icon name={action.icon} size={20} />
               </span>
               <span className="action-card__body">
+                <span className="action-card__index">0{index + 1}</span>
                 <strong>{action.label}</strong>
                 <small>{action.description}</small>
               </span>
@@ -181,22 +178,36 @@ export const HomeScreen = ({
           ))}
         </div>
 
-        <button className="home-support" onClick={onSupport} type="button">
-          <Icon name="chat" size={20} />
-          <span>
-            <strong>Связаться с менеджером</strong>
-            <small>Напишите в чат MAX — ответим по задаче</small>
-          </span>
-          <Icon name="arrow" size={18} />
-        </button>
+        <section className="process-panel">
+          <div className="section-heading">
+            <div>
+              <span className="section-heading__index">Как всё пройдёт</span>
+              <h2>От вводных к разговору</h2>
+              <p>Без повторного опроса и потери файлов в переписке</p>
+            </div>
+          </div>
+          <ol className="how-steps">
+            {howItWorks.map((step, index) => (
+              <li className="how-steps__item" key={step.title}>
+                <span className="how-steps__num" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <div>
+                  <strong>{step.title}</strong>
+                  <small>{step.text}</small>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
 
         <div className="trust-panel trust-panel--compact">
           <div>
-            <span className="section-heading__index">Данные</span>
-            <h2>Только необходимое</h2>
+            <span className="section-heading__index">Под вашим контролем</span>
+            <h2>Черновик — ваш. Отправка — только вручную.</h2>
             <p>
-              До согласия данные не уходят на сервер. Черновик можно продолжить позже, заявку —
-              отправить только вручную.
+              До согласия данные не уходят на сервер. Ответы можно проверить и изменить перед
+              отправкой менеджеру.
             </p>
           </div>
           <button onClick={() => onNavigate('privacy')} type="button">

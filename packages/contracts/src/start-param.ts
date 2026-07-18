@@ -1,10 +1,12 @@
 import { z } from 'zod';
 
 export const STATIC_START_PARAMS = [
+  'home',
   'new_project',
   'services',
   'portfolio',
   'upload_brief',
+  'admin',
 ] as const;
 
 export const StaticStartParamSchema = z.enum(STATIC_START_PARAMS);

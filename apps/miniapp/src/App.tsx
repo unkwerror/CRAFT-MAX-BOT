@@ -9,6 +9,9 @@ import type {
 } from '@craft72/contracts/source';
 
 import { Stage3ApiClient, Stage3ApiClientError } from './api/index.js';
+import { loadPublicExperience } from './api/public-experience.js';
+import { AdminPanel } from './admin/AdminPanel.js';
+import { DEFAULT_QUESTIONNAIRE_CONTENT } from './admin/questionnaire-content.js';
 import { createEmptyDraft, toFinalLeadForm } from './brief/draft.js';
 import { InlineNotice } from './components/FormControls.js';
 import {
@@ -46,6 +49,7 @@ import { PrivacyScreen } from './screens/PrivacyScreen.js';
 import { SuccessScreen } from './screens/SuccessScreen.js';
 import { SummaryScreen } from './screens/SummaryScreen.js';
 import { UploadScreen } from './screens/UploadScreen.js';
+import { MOCK_CASE_CATALOG } from './domain/case-catalog.js';
 
 type ToastState = { message: string; tone: ToastTone } | null;
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -137,6 +141,14 @@ export const App = () => {
   const browserStorage = useMemo(() => createBrowserDraftStorage(), []);
   const serverApi = useMemo(() => new Stage3ApiClient(), []);
   const initData = useMemo(() => maxBridge.getInitData(), []);
+  const adminStartRequested = useMemo(() => {
+    if (initData === null) return false;
+    try {
+      return new URLSearchParams(initData).get('start_param') === 'admin';
+    } catch {
+      return false;
+    }
+  }, [initData]);
   const shouldUseServer = privacyConfiguration.productionDataEnabled && initData !== null;
   const termsUrl = useMemo(
     () =>
@@ -161,7 +173,9 @@ export const App = () => {
   );
   const draftSaveQueue = useRef<Promise<void>>(Promise.resolve());
 
-  const [route, setRoute] = useState<AppRoute>(() => getRouteFromHash(window.location.hash));
+  const [route, setRoute] = useState<AppRoute>(() =>
+    adminStartRequested ? 'admin' : getRouteFromHash(window.location.hash),
+  );
   const [savedDraft, setSavedDraft] = useState<LeadDraft | null>(initialSavedDraft);
   const [draft, setDraft] = useState<LeadDraftFormState>(
     () => initialSavedDraft?.payload ?? createEmptyDraft(privacyConfiguration.consentVersion),
@@ -185,6 +199,8 @@ export const App = () => {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [saveStatusText, setSaveStatusText] = useState<string | undefined>();
   const [theme, setTheme] = useState(() => maxBridge.getTheme());
+  const [caseCatalog, setCaseCatalog] = useState(MOCK_CASE_CATALOG);
+  const [questionnaire, setQuestionnaire] = useState(DEFAULT_QUESTIONNAIRE_CONTENT);
 
   const showToast = useCallback((message: string, tone: ToastTone): void => {
     setToast({ message, tone });
@@ -231,6 +247,21 @@ export const App = () => {
     setHasActiveDraft(true);
     setDraft(nextDraft);
   }, []);
+
+  useEffect(() => {
+    if (!privacyConfiguration.productionDataEnabled) return undefined;
+    if (shouldUseServer && runtimeStatus !== 'connected') return undefined;
+    const controller = new AbortController();
+    void loadPublicExperience(controller.signal)
+      .then((experience) => {
+        setCaseCatalog(experience.cases);
+        setQuestionnaire(experience.questionnaire);
+      })
+      .catch(() => {
+        // Build-time content remains the resilient offline/preview fallback.
+      });
+    return () => controller.abort();
+  }, [runtimeStatus, shouldUseServer]);
 
   useEffect(() => {
     if (!shouldUseServer || initData === null || !privacyAcknowledged) return undefined;
@@ -345,10 +376,10 @@ export const App = () => {
   }, []);
 
   useEffect(() => {
-    if (hasActiveDraft) maxBridge.enableClosingConfirmation();
+    if (hasActiveDraft && route !== 'admin') maxBridge.enableClosingConfirmation();
     else maxBridge.disableClosingConfirmation();
     return () => maxBridge.disableClosingConfirmation();
-  }, [hasActiveDraft]);
+  }, [hasActiveDraft, route]);
 
   useEffect(() => {
     if (!hasActiveDraft) return undefined;
@@ -578,48 +609,46 @@ export const App = () => {
   );
 
   const handleOpenManagerChat = useCallback((): void => {
-    // 1) Phone (tel:) — preferred for direct call / handoff by number
-    // 2) MAX user deep-link
-    // 3) Bot profile as last resort
+    // Prefer an explicit public profile, then the native user-id link, and only then the phone.
     try {
-      if (maxBotConfiguration.managerPhone !== null) {
-        const dialed = maxBridge.openPhone(maxBotConfiguration.managerPhone);
-        if (dialed) {
-          maxBridge.close();
-          return;
-        }
-      }
-
-      const managerLink = maxBotConfiguration.managerUrl ?? maxBotConfiguration.url;
-      if (managerLink === null) {
-        showToast(
-          maxBotConfiguration.managerPhone === null
-            ? 'Чат с менеджером временно недоступен. Закройте приложение и напишите боту КРАФТ в MAX.'
-            : `Не удалось открыть звонок. Позвоните менеджеру: ${maxBotConfiguration.managerPhone}`,
-          'error',
-        );
+      if (
+        maxBotConfiguration.managerProfileUrl !== null &&
+        maxBridge.openMaxLink(maxBotConfiguration.managerProfileUrl)
+      ) {
         return;
       }
-
-      const opened = maxBridge.openMaxLink(managerLink);
-      if (!opened) {
-        showToast(
-          maxBotConfiguration.managerPhone === null
-            ? 'Не удалось открыть чат. Закройте Mini App и напишите менеджеру КРАФТ в MAX.'
-            : `Не удалось открыть чат. Позвоните: ${maxBotConfiguration.managerPhone}`,
-          'error',
-        );
-        return;
-      }
-      maxBridge.close();
     } catch {
-      showToast(
-        maxBotConfiguration.managerPhone === null
-          ? 'Не удалось открыть чат. Закройте Mini App и напишите менеджеру КРАФТ в MAX.'
-          : `Не удалось открыть чат. Позвоните: ${maxBotConfiguration.managerPhone}`,
-        'error',
-      );
+      // Continue to the native MAX user link.
     }
+
+    try {
+      if (
+        maxBotConfiguration.managerUserId !== null &&
+        maxBridge.openMaxUserProfile(maxBotConfiguration.managerUserId)
+      ) {
+        return;
+      }
+    } catch {
+      // Continue to the phone fallback.
+    }
+
+    try {
+      if (
+        maxBotConfiguration.managerPhone !== null &&
+        maxBridge.openPhone(maxBotConfiguration.managerPhone)
+      ) {
+        return;
+      }
+    } catch {
+      // Show the same actionable fallback as a rejected dialer navigation.
+    }
+
+    showToast(
+      maxBotConfiguration.managerPhone === null
+        ? 'Профиль менеджера в MAX временно недоступен. Попробуйте позже.'
+        : `Не удалось открыть профиль MAX. Позвоните менеджеру: ${maxBotConfiguration.managerPhone}`,
+      'error',
+    );
   }, [showToast]);
 
   const handleDocumentAdded = useCallback((documentId: string): void => {
@@ -760,6 +789,7 @@ export const App = () => {
     case 'brief':
       screen = (
         <BriefScreen
+          caseCatalog={caseCatalog}
           consentVersion={privacyConfiguration.consentVersion}
           draft={draft}
           isSaving={isSaving}
@@ -772,6 +802,7 @@ export const App = () => {
           onRequestContact={handleRequestContact}
           onSaveAndExit={handleSaveAndExit}
           phoneVerified={phoneVerified}
+          questionnaire={questionnaire}
           {...(privacyConfiguration.productionDataEnabled && privacyConfiguration.policyUrl !== null
             ? { privacyPolicyUrl: privacyConfiguration.policyUrl }
             : {})}
@@ -787,6 +818,7 @@ export const App = () => {
       screen = (
         <CasesScreen
           bridge={maxBridge}
+          items={caseCatalog}
           onBack={handleBack}
           onDiscuss={handleCaseDiscuss}
           selectedCaseIds={draft.selectedCaseIds ?? []}
@@ -880,9 +912,12 @@ export const App = () => {
         />
       );
       break;
+    case 'admin':
+      screen = <AdminPanel initData={initData} onExit={() => navigate('home')} />;
+      break;
   }
 
-  if (runtimeStatus === 'awaiting-consent') {
+  if (route !== 'admin' && runtimeStatus === 'awaiting-consent') {
     screen = (
       <PrivacyScreen
         consentVersion={privacyConfiguration.consentVersion}
@@ -894,9 +929,9 @@ export const App = () => {
         {...(termsUrl === null ? {} : { termsUrl })}
       />
     );
-  } else if (runtimeStatus === 'connecting') {
+  } else if (route !== 'admin' && runtimeStatus === 'connecting') {
     screen = <LoadingScreen label="Проверяем защищённую MAX-сессию…" />;
-  } else if (runtimeStatus === 'error') {
+  } else if (route !== 'admin' && runtimeStatus === 'error') {
     screen = (
       <RuntimeUnavailableScreen
         onRetry={() => {
@@ -906,6 +941,7 @@ export const App = () => {
       />
     );
   } else if (
+    route !== 'admin' &&
     runtimeStatus === 'connected' &&
     !privacyAcknowledged &&
     (route === 'brief' || route === 'summary' || route === 'upload')
@@ -955,15 +991,20 @@ export const App = () => {
   return (
     <MaxUI colorScheme={theme} platform={platform}>
       <div className="app" data-platform={maxBridge.getPlatform()}>
-        <AppTopbar
-          onNavigate={handleNavigation}
-          status={runtimeLabel}
-          statusTone={runtimeStatusTone(runtimeStatus)}
-        />
-        {runtimeStatus === 'connected' ? null : (
+        {route === 'admin' ? null : (
+          <AppTopbar
+            onNavigate={handleNavigation}
+            status={runtimeLabel}
+            statusTone={runtimeStatusTone(runtimeStatus)}
+          />
+        )}
+        {route === 'admin' || runtimeStatus === 'connected' ? null : (
           <div className="mock-ribbon">{runtimeNotice}</div>
         )}
-        <div className="screen-shell" key={`${runtimeStatus}:${route}`}>
+        <div
+          className={route === 'admin' ? 'screen-shell screen-shell--admin' : 'screen-shell'}
+          key={`${runtimeStatus}:${route}`}
+        >
           {screen}
         </div>
         {showNavigation ? (

@@ -1,3 +1,4 @@
+import { BOT_WELCOME_CONTENT_KEY, publishedBotWelcomeText } from './bot-plan.js';
 import { classifyMaxApiFailure, type MaxApiClient } from './max-api.js';
 import { MaxUpdateParseError } from './max-update.js';
 import {
@@ -20,6 +21,7 @@ export type WorkerLogger = (
 ) => void;
 
 export interface BotWorkerOptions extends RetryPolicy {
+  readonly adminMaxUserIds?: readonly string[];
   readonly leaseSeconds: number;
   readonly maxAttempts: number;
   readonly maxApi: MaxApiClient;
@@ -76,6 +78,26 @@ async function failWebhook(
   });
 }
 
+async function loadWelcomeText(options: BotWorkerOptions): Promise<string | undefined> {
+  try {
+    const content = await options.store.getPublishedContent(BOT_WELCOME_CONTENT_KEY);
+    if (content === null) return undefined;
+    const text = publishedBotWelcomeText(content);
+    if (text === null) {
+      options.log?.('warn', 'bot_welcome_content_invalid', {
+        contentKey: BOT_WELCOME_CONTENT_KEY,
+      });
+      return undefined;
+    }
+    return text;
+  } catch {
+    options.log?.('warn', 'bot_welcome_content_read_failed', {
+      contentKey: BOT_WELCOME_CONTENT_KEY,
+    });
+    return undefined;
+  }
+}
+
 async function deliverOutbound(
   claim: ClaimedOutboundAction,
   options: BotWorkerOptions,
@@ -126,7 +148,8 @@ export async function runWorkerCycle(
   const webhook = await options.store.claimWebhook(cycleNow, staleBefore);
   if (webhook !== null) {
     try {
-      const result = processWebhook(webhook, options.webApp);
+      const welcomeText = await loadWelcomeText(options);
+      const result = processWebhook(webhook, options.webApp, options.adminMaxUserIds, welcomeText);
       await options.store.completeWebhook(webhook, result, cycleNow);
     } catch (error) {
       await failWebhook(webhook, error, options, cycleNow);

@@ -56,7 +56,7 @@ test('an unfinished raw step survives refresh', async ({ page }) => {
 
 test('mock upload metadata survives refresh', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: /Отправить ТЗ/ }).click();
+  await page.getByRole('button', { name: /Отправить материалы/ }).click();
   await page.getByLabel('Выбрать файлы').setInputFiles({
     buffer: Buffer.from('%PDF-1.7 mock brief'),
     mimeType: 'application/pdf',
@@ -119,7 +119,7 @@ test('a complete mock brief produces one stable submission', async ({ page }) =>
 
   await page.getByRole('button', { name: 'Передать контакт из MAX' }).click();
   await expect(page.getByText(/MAX не передал контакт/)).toBeVisible();
-  await page.getByLabel('Телефон').fill('+79990000000');
+  await page.getByRole('textbox', { name: /Телефон/ }).fill('+79990000000');
   await continueBrief(page);
 
   await page.getByLabel('Email').fill('project@example.ru');
@@ -128,7 +128,7 @@ test('a complete mock brief produces one stable submission', async ({ page }) =>
   await page.getByRole('checkbox', { name: /обработку данных заявки/ }).check();
   await continueBrief(page);
 
-  await page.getByRole('button', { name: 'Перейти к проверке' }).click();
+  await page.getByRole('button', { name: 'К проверке' }).click();
   await expect(page.getByRole('heading', { name: 'Резюме заявки' })).toBeVisible();
 
   const roleSection = page.locator('.summary-card').filter({ hasText: 'Роль' });

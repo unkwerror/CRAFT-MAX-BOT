@@ -2,10 +2,15 @@ import { getTableConfig } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
 import {
+  adminAuditLog,
+  adminSessions,
   botDialogStatusEnum,
   botDialogs,
   botInquiries,
   botInquiryStatusEnum,
+  caseCatalogItems,
+  contentDocumentKindEnum,
+  contentDocuments,
   documentAccessGrants,
   documentScanJobs,
   documentScanJobStatusEnum,
@@ -19,6 +24,7 @@ import {
   maxUsers,
   sessions,
   submissions,
+  submissionReviewStatusEnum,
   uploadSessions,
   uploadSessionStatusEnum,
   webhookInbox,
@@ -27,6 +33,10 @@ import {
 describe('database schema', () => {
   it('exports every MVP table', () => {
     const names = [
+      adminSessions,
+      adminAuditLog,
+      caseCatalogItems,
+      contentDocuments,
       maxUsers,
       sessions,
       leadDrafts,
@@ -43,6 +53,10 @@ describe('database schema', () => {
     ].map((table) => getTableConfig(table).name);
 
     expect(names).toEqual([
+      'admin_sessions',
+      'admin_audit_log',
+      'case_catalog_items',
+      'content_documents',
       'max_users',
       'sessions',
       'lead_drafts',
@@ -140,6 +154,49 @@ describe('database schema', () => {
     expect(getTableConfig(botInquiries).foreignKeys).toHaveLength(1);
     expect(getTableConfig(maxBotOutbox).foreignKeys).toHaveLength(1);
     expect(getTableConfig(webhookInbox).foreignKeys).toHaveLength(0);
+    expect(getTableConfig(adminSessions).foreignKeys).toHaveLength(1);
+    expect(getTableConfig(adminAuditLog).foreignKeys).toHaveLength(1);
+    expect(getTableConfig(caseCatalogItems).foreignKeys).toHaveLength(0);
+    expect(getTableConfig(contentDocuments).foreignKeys).toHaveLength(0);
+  });
+
+  it('keeps admin sessions hashed and admin writes versioned and auditable', () => {
+    const sessionConfig = getTableConfig(adminSessions);
+    const caseConfig = getTableConfig(caseCatalogItems);
+    const contentConfig = getTableConfig(contentDocuments);
+    const auditConfig = getTableConfig(adminAuditLog);
+
+    expect(adminSessions.tokenHash.getSQLType()).toBe('varchar(64)');
+    expect(sessionConfig.uniqueConstraints.map(({ name }) => name)).toContain(
+      'admin_sessions_token_hash_unique',
+    );
+    expect(sessionConfig.checks.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'admin_sessions_token_hash_format',
+        'admin_sessions_expiry_after_creation',
+      ]),
+    );
+    expect(caseCatalogItems.version.notNull).toBe(true);
+    expect(caseConfig.checks.map(({ name }) => name)).toContain(
+      'case_catalog_items_version_positive',
+    );
+    expect(contentDocuments.version.notNull).toBe(true);
+    expect(contentConfig.checks.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        'content_documents_draft_object',
+        'content_documents_published_consistent',
+      ]),
+    );
+    expect(auditConfig.checks.map(({ name }) => name)).toContain('admin_audit_log_metadata_object');
+    expect(contentDocumentKindEnum.enumValues).toEqual(['questionnaire', 'miniapp', 'bot']);
+    expect(submissionReviewStatusEnum.enumValues).toEqual([
+      'new',
+      'in_review',
+      'contacted',
+      'qualified',
+      'closed',
+      'rejected',
+    ]);
   });
 
   it('stores nullable bot identities without coupling bot retention to MAX users', () => {

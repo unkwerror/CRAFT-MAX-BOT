@@ -17,8 +17,6 @@ import { maxBridge, type MaxBridgeAdapter } from '../platform/index.js';
 
 const uniqueValues = (values: readonly string[]): readonly string[] => [...new Set(values)];
 
-const REGIONS = uniqueValues(MOCK_CASE_CATALOG.map((item) => item.region));
-
 interface CaseFilters {
   readonly objectType: string;
   readonly service: string;
@@ -39,6 +37,7 @@ const EMPTY_FILTERS: CaseFilters = {
 
 export interface CasesScreenProps {
   readonly bridge?: Pick<MaxBridgeAdapter, 'openLink'>;
+  readonly items?: readonly CaseCatalogItem[];
   readonly onBack: () => void;
   readonly onDiscuss: (item: CaseCatalogItem) => void;
   readonly selectedCaseIds?: readonly CaseId[];
@@ -46,6 +45,7 @@ export interface CasesScreenProps {
 
 export const CasesScreen = ({
   bridge = maxBridge,
+  items = MOCK_CASE_CATALOG,
   onBack,
   onDiscuss,
   selectedCaseIds = [],
@@ -56,15 +56,16 @@ export const CasesScreen = ({
   const cities = useMemo(
     () =>
       uniqueValues(
-        MOCK_CASE_CATALOG.filter(
-          (item) => filters.region === '' || item.region === filters.region,
-        ).map((item) => item.city),
+        items
+          .filter((item) => filters.region === '' || item.region === filters.region)
+          .map((item) => item.city),
       ),
-    [filters.region],
+    [filters.region, items],
   );
+  const regions = useMemo(() => uniqueValues(items.map((item) => item.region)), [items]);
   const filteredCases = useMemo(
     () =>
-      filterCaseCatalog(MOCK_CASE_CATALOG, {
+      filterCaseCatalog(items, {
         ...(filters.objectType === '' ? {} : { objectType: filters.objectType }),
         ...(filters.service === '' ? {} : { service: filters.service }),
         ...(filters.region === '' ? {} : { region: filters.region }),
@@ -72,7 +73,7 @@ export const CasesScreen = ({
         ...(filters.scale === '' ? {} : { scale: filters.scale }),
         ...(filters.constructionKind === '' ? {} : { constructionKind: filters.constructionKind }),
       }),
-    [filters],
+    [filters, items],
   );
   const hasActiveFilters = Object.values(filters).some((value) => value !== '');
 
@@ -108,9 +109,7 @@ export const CasesScreen = ({
         <button
           aria-controls="case-filters"
           aria-expanded={filtersOpen}
-          className={
-            hasActiveFilters ? 'filter-panel__toggle is-active' : 'filter-panel__toggle'
-          }
+          className={hasActiveFilters ? 'filter-panel__toggle is-active' : 'filter-panel__toggle'}
           onClick={() => setFiltersOpen((open) => !open)}
           type="button"
         >
@@ -160,7 +159,7 @@ export const CasesScreen = ({
                 updateFilter({
                   region,
                   ...(filters.city !== '' &&
-                  !MOCK_CASE_CATALOG.some(
+                  !items.some(
                     (item) =>
                       item.city === filters.city && (region === '' || item.region === region),
                   )
@@ -168,7 +167,7 @@ export const CasesScreen = ({
                     : {}),
                 })
               }
-              options={REGIONS.map((region) => ({ label: region, value: region }))}
+              options={regions.map((region) => ({ label: region, value: region }))}
               value={filters.region}
             />
             <FilterSelect

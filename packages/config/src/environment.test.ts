@@ -18,10 +18,15 @@ const validEnvironment = {
   MAX_API_BASE_URL: 'https://platform-api2.max.ru',
   MAX_BOT_TOKEN: 'rotated-token-with-enough-length',
   MAX_BOT_PUBLIC_NAME: 'craft72_bot',
+  MAX_MANAGER_PROFILE_URL: 'https://max.ru/u/Manager_token-123',
+  MAX_MANAGER_USER_ID: '61096226',
+  MAX_MANAGER_PHONE: '+79220063645',
   MAX_WEBHOOK_SECRET: 'a-random-webhook-secret-with-32-characters',
   MAX_API_TIMEOUT_MS: '10000',
   MAX_INIT_DATA_MAX_AGE_SECONDS: '3600',
   MAX_CONTACT_MAX_AGE_SECONDS: '300',
+  ADMIN_MAX_USER_IDS: '61096226,9223372036854775807',
+  ADMIN_SESSION_TTL_SECONDS: '28800',
   BOT_WORKER_POLL_INTERVAL_MS: '500',
   BOT_WORKER_LEASE_SECONDS: '60',
   BOT_WORKER_MAX_ATTEMPTS: '8',
@@ -103,6 +108,17 @@ describe('parseServerEnvironment', () => {
     expect(environment.SESSION_TTL_SECONDS).toBe(3_600);
     expect(environment.DRAFT_TTL_SECONDS).toBe(2_592_000);
     expect(environment.SUBMISSION_RETENTION_DAYS).toBe(1_095);
+    expect(environment.ADMIN_MAX_USER_IDS).toEqual(['61096226', '9223372036854775807']);
+    expect(environment.ADMIN_SESSION_TTL_SECONDS).toBe(28_800);
+    expect(environment.MAX_MANAGER_PROFILE_URL).toBe('https://max.ru/u/Manager_token-123');
+  });
+
+  it('requires a unique MAX admin allowlist in production', () => {
+    for (const ADMIN_MAX_USER_IDS of ['', '0', '61096226,61096226', '9223372036854775808']) {
+      expect(() => parseServerEnvironment({ ...validEnvironment, ADMIN_MAX_USER_IDS })).toThrow(
+        ConfigurationError,
+      );
+    }
   });
 
   it('rejects unsupported MAX API endpoints', () => {

@@ -1,6 +1,7 @@
 import {
   botDialogs,
   botInquiries,
+  contentDocuments,
   maxBotOutbox,
   webhookInbox,
   type Database,
@@ -72,6 +73,7 @@ export interface BotWorkerStore {
     retryAt: Date | null,
     now: Date,
   ): Promise<void>;
+  getPublishedContent(key: string): Promise<JsonObject | null>;
   isReady(): Promise<void>;
 }
 
@@ -152,6 +154,21 @@ export class PostgresBotWorkerStore implements BotWorkerStore {
 
   public async isReady(): Promise<void> {
     await this.#database.execute(sql`select 1`);
+  }
+
+  public async getPublishedContent(key: string): Promise<JsonObject | null> {
+    const result = await this.#database.execute(sql`
+      select source_document.published as "published"
+      from ${contentDocuments} as source_document
+      where source_document.key = ${key}
+        and source_document.kind = 'bot'
+        and source_document.published is not null
+        and source_document.published_version is not null
+        and source_document.published_at is not null
+      limit 1
+    `);
+    const row = firstRow(result);
+    return row === null ? null : jsonObject(row.published);
   }
 
   public async claimWebhook(now: Date, staleBefore: Date): Promise<ClaimedWebhook | null> {

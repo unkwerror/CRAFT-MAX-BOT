@@ -13,14 +13,7 @@ export interface FieldProps {
   readonly optional?: boolean;
 }
 
-export const Field = ({
-  children,
-  error,
-  errorId,
-  hint,
-  label,
-  optional = false,
-}: FieldProps) => {
+export const Field = ({ children, error, errorId, hint, label, optional = false }: FieldProps) => {
   const generatedErrorId = useId();
   const resolvedErrorId = errorId ?? generatedErrorId;
 
@@ -36,7 +29,9 @@ export const Field = ({
           {error}
         </span>
       )}
-      {hint === undefined || error !== undefined ? null : <span className="field__hint">{hint}</span>}
+      {hint === undefined || error !== undefined ? null : (
+        <span className="field__hint">{hint}</span>
+      )}
     </label>
   );
 };

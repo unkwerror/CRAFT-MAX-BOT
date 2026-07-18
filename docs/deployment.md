@@ -35,8 +35,11 @@ CONSENT_VERSION=miniapp-2026-07-16-stage5
 API_HOST=127.0.0.1
 API_PORT=4100
 MAX_BOT_PUBLIC_NAME=se13560957_bot
+MAX_MANAGER_PROFILE_URL=https://max.ru/u/<COPIED_MANAGER_PROFILE_TOKEN>
 MAX_MANAGER_USER_ID=61096226
 MAX_MANAGER_PHONE=+79220063645
+ADMIN_MAX_USER_IDS=61096226
+ADMIN_SESSION_TTL_SECONDS=28800
 SUBMISSION_RETENTION_DAYS=1095
 LOG_RETENTION_DAYS=90
 BACKUP_RETENTION_DAYS=30
@@ -80,6 +83,19 @@ TRACKER_RETRY_MAX_MS=300000
 The same file contains `DATABASE_URL`, `MAX_BOT_TOKEN`, `MAX_WEBHOOK_SECRET`, `TRACKER_TOKEN`,
 `TRACKER_ORG_ID` and a random `UPLOAD_SIGNING_SECRET` of at least 32 URL-safe characters. None of
 those values belong in `VITE_*`, a release archive, Git or deployment logs. Keep mode `600`.
+
+`ADMIN_MAX_USER_IDS` is a comma-separated allowlist of signed MAX user IDs. Production startup
+fails when it is empty; changing it takes effect for every admin request, including existing
+sessions. Do not expose a separate browser token: the API issues a hashed server session through a
+`Secure`, `HttpOnly`, `SameSite=Strict` cookie with the bounded `ADMIN_SESSION_TTL_SECONDS` TTL.
+The deployment script validates this allowlist before building or applying migrations, so a missing,
+duplicated or malformed administrator ID cannot leave the new services unable to start.
+Apply `0005_admin_foundation.sql` before exposing the admin routes, and verify the migration backup
+before activation; its development rollback refuses to discard any admin-managed data.
+
+`MAX_MANAGER_PROFILE_URL` must be the exact personal link copied from the manager's MAX profile;
+it cannot be derived from the numeric user ID. The Mini App prefers this HTTPS link, then uses the
+native `max://user/<id>` bridge link and finally the configured phone as a fallback.
 
 ### Install and verify ClamAV
 

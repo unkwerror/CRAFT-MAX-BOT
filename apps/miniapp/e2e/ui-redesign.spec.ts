@@ -16,7 +16,7 @@ async function openHome(page: Page): Promise<void> {
 
 async function measureLayout(page: Page, viewportWidth: number) {
   const primary = page.getByRole('button', { name: 'Заполнить анкету' });
-  const secondary = page.getByRole('button', { exact: true, name: 'Смотреть проекты' });
+  const secondary = page.getByRole('button', { exact: true, name: 'Связаться с менеджером' });
   const [primaryBox, secondaryBox] = await Promise.all([
     primary.boundingBox(),
     secondary.boundingBox(),
@@ -39,7 +39,7 @@ async function measureLayout(page: Page, viewportWidth: number) {
     const navigation = document.querySelector('.bottom-nav');
     const screenShell = document.querySelector('.screen-shell');
     const secondaryAction = [...document.querySelectorAll('button')].find(
-      (button) => button.textContent?.trim() === 'Смотреть проекты',
+      (button) => button.textContent?.trim() === 'Связаться с менеджером',
     );
     const intersects =
       navigation instanceof HTMLElement && secondaryAction instanceof HTMLElement
@@ -104,24 +104,19 @@ async function runViewportMatrix(
     expect(Number.parseFloat(layoutState.animationDuration), label).toBeGreaterThan(0.18);
 
     if (colorScheme === 'dark') {
-      expect(isDarkRgb(layoutState.bodyBackground), `${label} body bg ${layoutState.bodyBackground}`).toBe(
-        true,
-      );
+      expect(
+        isDarkRgb(layoutState.bodyBackground),
+        `${label} body bg ${layoutState.bodyBackground}`,
+      ).toBe(true);
     }
 
     if (viewport.name === 'mobile-390') {
-      const routeScroll = await page.evaluate(() => {
-        document.documentElement.scrollTop = 900;
-        document.body.scrollTop = 900;
-        const before = scrollY;
-        const finder = [...document.querySelectorAll('button')].find((button) =>
-          button.textContent?.includes('Подобрать услугу'),
-        );
-        if (finder instanceof HTMLButtonElement) finder.click();
-        return { after: scrollY, before };
-      });
-      expect(routeScroll.before, label).toBeGreaterThan(500);
-      expect(routeScroll.after, label).toBe(0);
+      await page.evaluate(() => scrollTo(0, 900));
+      await expect
+        .poll(() => page.evaluate(() => scrollY), { message: label })
+        .toBeGreaterThan(500);
+      await page.getByRole('button', { name: /Подобрать услугу/ }).click();
+      await expect.poll(() => page.evaluate(() => scrollY), { message: label }).toBe(0);
       await expect(page.getByRole('heading', { name: 'Подобрать услугу' })).toBeVisible();
     }
 
@@ -138,7 +133,9 @@ async function runViewportMatrix(
   }
 }
 
-test('mobile CTA geometry and motion remain stable (light + dark)', async ({ browser }, testInfo) => {
+test('mobile CTA geometry and motion remain stable (light + dark)', async ({
+  browser,
+}, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Run the viewport matrix once.');
 
   for (const colorScheme of colorSchemes) {

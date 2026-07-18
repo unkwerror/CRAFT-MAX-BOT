@@ -56,7 +56,7 @@ import { UploadServiceError, type SecureUploadService } from './upload-service.j
 
 const AUTHORIZATION_PATTERN = /^Bearer ([A-Za-z0-9_-]{43})$/;
 
-class ApiHttpError extends Error {
+export class ApiHttpError extends Error {
   public readonly code: ApiErrorCode;
   public readonly issues: readonly ApiErrorIssue[] | undefined;
   public readonly statusCode: number;
@@ -73,6 +73,10 @@ class ApiHttpError extends Error {
     this.code = code;
     this.issues = issues;
   }
+}
+
+export interface Stage3ApiModule {
+  register(app: FastifyInstance): Promise<void>;
 }
 
 interface RateLimitBucket {
@@ -110,6 +114,7 @@ class FixedWindowRateLimiter {
 }
 
 export interface Stage3ApiOptions {
+  readonly admin?: Stage3ApiModule;
   readonly botToken: string;
   readonly consentVersion: string;
   readonly contactMaxAgeSeconds: number;
@@ -212,7 +217,8 @@ export async function buildStage3Api(options: Stage3ApiOptions): Promise<Fastify
       'x-craft72-upload-token',
       'x-request-id',
     ],
-    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     origin: allowedOrigin,
   });
   await app.register(rateLimit, {
@@ -568,6 +574,10 @@ export async function buildStage3Api(options: Stage3ApiOptions): Promise<Fastify
     }
     return SubmissionReadResponseSchema.parse({ submission });
   });
+
+  if (options.admin !== undefined) {
+    await options.admin.register(app);
+  }
 
   return app;
 }

@@ -51,9 +51,18 @@ function answerCallbackAction(action: BotAnswerCallbackAction): PlannedOutboundA
   };
 }
 
-export function processWebhook(claim: ClaimedWebhook, webApp: string): WebhookProcessingResult {
+export function processWebhook(
+  claim: ClaimedWebhook,
+  webApp: string,
+  adminMaxUserIds: readonly string[] = [],
+  welcomeText?: string,
+): WebhookProcessingResult {
   const update = parseMaxUpdate(claim.payload);
-  const plan = planBotActions(update, { webApp });
+  const plan = planBotActions(update, {
+    adminMaxUserIds,
+    webApp,
+    ...(welcomeText === undefined ? {} : { welcomeText }),
+  });
   const dialogAction = plan.find(
     (action): action is BotSetDialogStateAction => action.kind === 'set_dialog_state',
   );

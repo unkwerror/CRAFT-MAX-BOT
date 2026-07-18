@@ -33,6 +33,14 @@ describe('planBotActions', () => {
           [
             {
               type: 'open_app',
+              text: 'Открыть КРАФТ',
+              web_app: WEB_APP,
+              payload: 'home',
+            },
+          ],
+          [
+            {
+              type: 'open_app',
               text: 'Заполнить анкету',
               web_app: WEB_APP,
               payload: 'new_project',
@@ -62,6 +70,28 @@ describe('planBotActions', () => {
     }
   });
 
+  it('adds the admin entry only for an exactly allowlisted MAX actor', () => {
+    const adminPlan = planBotActions(lifecycle('bot_started'), {
+      adminMaxUserIds: ['123456789'],
+      webApp: WEB_APP,
+    });
+    const nonAdminPlan = planBotActions(lifecycle('bot_started'), {
+      adminMaxUserIds: ['987654321'],
+      webApp: WEB_APP,
+    });
+    const malformedIdPlan = planBotActions(lifecycle('bot_started'), {
+      adminMaxUserIds: ['0123456789'],
+      webApp: WEB_APP,
+    });
+
+    expect(JSON.stringify(adminPlan)).toContain(
+      '{"payload":"admin","text":"Админ-панель","type":"open_app","web_app":"craft72_bot"}',
+    );
+    expect(JSON.stringify(adminPlan)).toContain('"payload":"admin"');
+    expect(JSON.stringify(nonAdminPlan)).not.toContain('"payload":"admin"');
+    expect(JSON.stringify(malformedIdPlan)).not.toContain('"payload":"admin"');
+  });
+
   it('welcomes bot_started and /start with a shared short-window idempotency key', () => {
     const started = planBotActions(lifecycle('bot_started'), { webApp: WEB_APP });
     const startCommand = planBotActions(message('/start'), { webApp: WEB_APP });
@@ -74,10 +104,36 @@ describe('planBotActions', () => {
       chatId: '182182182',
       kind: 'send_message',
       body: {
-        text: expect.stringMatching(/Здравствуйте! Это КРАФТ[\s\S]*мини-приложени/i),
+        text: expect.stringMatching(
+          /Здравствуйте![\s\S]*проектного бюро КРАФТ[\s\S]*мини-приложени/i,
+        ),
       },
     });
   });
+
+  it('applies a validated welcome override without changing the home/admin keyboard payloads', () => {
+    const actions = planBotActions(lifecycle('bot_started'), {
+      adminMaxUserIds: ['123456789'],
+      webApp: WEB_APP,
+      welcomeText: '  Новое приветствие  ',
+    });
+    const send = actions.find(({ kind }) => kind === 'send_message');
+
+    expect(send).toMatchObject({ body: { text: 'Новое приветствие' } });
+    expect(JSON.stringify(send)).toContain('"payload":"home"');
+    expect(JSON.stringify(send)).toContain('"payload":"admin"');
+  });
+
+  it.each(['', '   ', 'x'.repeat(4_001)])(
+    'falls back to the built-in welcome for invalid override %j',
+    (welcomeText) => {
+      const actions = planBotActions(lifecycle('bot_started'), { webApp: WEB_APP, welcomeText });
+      const send = actions.find(({ kind }) => kind === 'send_message');
+      expect(send).toMatchObject({
+        body: { text: expect.stringContaining('Я помощник проектного бюро КРАФТ') },
+      });
+    },
+  );
 
   it('answers manager contact with a dedicated handoff message', () => {
     const actions = planBotActions(message('Связаться с менеджером'), { webApp: WEB_APP });

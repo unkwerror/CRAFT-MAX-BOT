@@ -61,6 +61,7 @@ describe('MAX Bridge adapter', () => {
     expect(() => bridge.enableClosingConfirmation()).not.toThrow();
     expect(() => bridge.disableClosingConfirmation()).not.toThrow();
     expect(bridge.openLink('https://craft72.ru/')).toBe(false);
+    expect(bridge.openMaxUserProfile('61096226')).toBe(false);
     expect(() => unsubscribe()).not.toThrow();
 
     await expect(bridge.requestContact()).rejects.toMatchObject({
@@ -417,6 +418,42 @@ describe('MAX Bridge adapter', () => {
     expect(() => bridge.openLink('http://craft72.ru/')).toThrow(TypeError);
     expect(() => bridge.openMaxLink('https://max.ru.evil.example/craft72')).toThrow(TypeError);
   });
+
+  it('opens numeric user profiles only through the injected native MAX Bridge', () => {
+    const browserOpen = vi.fn();
+    const openMaxLink = vi.fn();
+    const bridge = createMaxBridge({
+      WebApp: createWebApp({ openMaxLink }),
+      open: browserOpen,
+    });
+
+    expect(bridge.openMaxUserProfile('61096226')).toBe(true);
+    expect(openMaxLink).toHaveBeenCalledWith('max://user/61096226');
+    expect(browserOpen).not.toHaveBeenCalled();
+
+    const rejectingBrowserOpen = vi.fn();
+    const rejectingBridge = createMaxBridge({
+      WebApp: createWebApp({
+        openMaxLink: () => {
+          throw new Error('native navigation rejected');
+        },
+      }),
+      open: rejectingBrowserOpen,
+    });
+    expect(rejectingBridge.openMaxUserProfile('61096226')).toBe(false);
+    expect(rejectingBrowserOpen).not.toHaveBeenCalled();
+
+    const browserOnlyOpen = vi.fn();
+    expect(createMaxBridge({ open: browserOnlyOpen }).openMaxUserProfile('61096226')).toBe(false);
+    expect(browserOnlyOpen).not.toHaveBeenCalled();
+  });
+
+  it.each(['', '12', '0', '-61096226', '61096226/extra', '9223372036854775808'])(
+    'rejects an unsafe native MAX user id: %s',
+    (value) => {
+      expect(() => createMaxBridge(undefined).openMaxUserProfile(value)).toThrow(TypeError);
+    },
+  );
 
   it('opens a secure, detached browser tab as a link fallback', () => {
     const openedWindow = { opener: { unsafe: true } };

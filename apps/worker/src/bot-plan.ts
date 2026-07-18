@@ -8,7 +8,14 @@ import type {
 } from './max-api.js';
 import type { ParsedMaxUpdate } from './max-update.js';
 
-export const BOT_START_PAYLOADS = ['new_project', 'services', 'portfolio', 'upload_brief'] as const;
+export const BOT_START_PAYLOADS = [
+  'home',
+  'new_project',
+  'services',
+  'portfolio',
+  'upload_brief',
+  'admin',
+] as const;
 
 export type BotStartPayload = (typeof BOT_START_PAYLOADS)[number];
 
@@ -51,12 +58,23 @@ export type BotPlannedAction =
 export interface BotPlanOptions {
   /** Public username of the bot whose Mini App should be opened. */
   readonly webApp: string;
+  /** Canonical MAX user IDs that may receive the administrative Mini App entry point. */
+  readonly adminMaxUserIds?: readonly string[];
+  /** Validated, published administrator override for the greeting text. */
+  readonly welcomeText?: string;
 }
 
+export interface OpenAppKeyboardOptions {
+  /** Adds the administrative entry point. The caller must authorize the current MAX actor first. */
+  readonly includeAdmin?: boolean;
+}
+
+export const BOT_WELCOME_CONTENT_KEY = 'bot-welcome' as const;
+
 const WELCOME_TEXT =
-  'Здравствуйте! Это КРАФТ — архитектурно-проектная команда.\n\n' +
-  'Чтобы оставить заявку, посмотреть проекты или отправить материалы, откройте мини-приложение кнопкой ниже.\n\n' +
-  'Если удобнее написать здесь — кратко опишите задачу, и менеджер получит сообщение.';
+  'Здравствуйте! Я помощник проектного бюро КРАФТ 👋\n\n' +
+  'В мини-приложении можно за 7–10 минут собрать бриф, подобрать услугу, посмотреть проекты и приложить материалы. Черновик сохранится автоматически.\n\n' +
+  'Нажмите «Открыть КРАФТ» ниже. Если удобнее остаться в чате — кратко опишите задачу одним сообщением.';
 const ROUTING_TEXT =
   'Спасибо, сообщение принято. Чтобы ускорить работу, откройте нужный раздел мини-приложения кнопками ниже — или дождитесь ответа менеджера.';
 const CALLBACK_TEXT = 'Откройте нужный раздел мини-приложения КРАФТ:';
@@ -68,6 +86,19 @@ const MANAGER_HANDOFF_TEXT =
   'Или откройте мини-приложение, чтобы заполнить анкету и приложить материалы.';
 const START_COMMAND_PATTERN = /^\/start(?:@[A-Za-z0-9_]+)?(?:\s|$)/i;
 const WELCOME_DEDUPLICATION_WINDOW_MS = 5 * 60 * 1_000;
+const MAX_MESSAGE_TEXT_LENGTH = 4_000;
+
+/**
+ * Reads the published `bot-welcome` payload shape: `{ "text": "..." }`.
+ * Unknown keys are ignored so the document can be extended without breaking the worker.
+ */
+export function publishedBotWelcomeText(content: unknown): string | null {
+  if (typeof content !== 'object' || content === null || Array.isArray(content)) return null;
+  const text = (content as { readonly text?: unknown }).text;
+  if (typeof text !== 'string') return null;
+  const normalized = text.trim();
+  return normalized.length > 0 && normalized.length <= MAX_MESSAGE_TEXT_LENGTH ? normalized : null;
+}
 
 function safeWebApp(value: string): string {
   const normalized = value.trim();
@@ -86,12 +117,19 @@ function openAppButton(text: string, webApp: string, payload: BotStartPayload): 
   return { payload, text, type: 'open_app', web_app: webApp };
 }
 
-export function createOpenAppKeyboard(webAppInput: string): MaxInlineKeyboardAttachment {
+export function createOpenAppKeyboard(
+  webAppInput: string,
+  options: OpenAppKeyboardOptions = {},
+): MaxInlineKeyboardAttachment {
   const webApp = safeWebApp(webAppInput);
   return {
     type: 'inline_keyboard',
     payload: {
       buttons: [
+        ...(options.includeAdmin === true
+          ? [[openAppButton('Админ-панель', webApp, 'admin')]]
+          : []),
+        [openAppButton('Открыть КРАФТ', webApp, 'home')],
         [openAppButton('Заполнить анкету', webApp, 'new_project')],
         [
           openAppButton('Подобрать услугу', webApp, 'services'),
@@ -104,8 +142,12 @@ export function createOpenAppKeyboard(webAppInput: string): MaxInlineKeyboardAtt
   };
 }
 
-function messageBody(text: string, webApp: string): MaxSendMessageBody {
-  return { attachments: [createOpenAppKeyboard(webApp)], text };
+function messageBody(text: string, webApp: string, includeAdmin: boolean): MaxSendMessageBody {
+  return { attachments: [createOpenAppKeyboard(webApp, { includeAdmin })], text };
+}
+
+function isAdminActor(update: ParsedMaxUpdate, adminMaxUserIds: readonly string[]): boolean {
+  return update.actorUserId !== null && adminMaxUserIds.includes(update.actorUserId);
 }
 
 function eventActionKey(update: ParsedMaxUpdate, action: string): string {
@@ -171,11 +213,18 @@ export function planBotActions(
   options: BotPlanOptions,
 ): readonly BotPlannedAction[] {
   const webApp = safeWebApp(options.webApp);
+  const includeAdmin = isAdminActor(update, options.adminMaxUserIds ?? []);
+  const welcomeText = publishedBotWelcomeText({ text: options.welcomeText }) ?? WELCOME_TEXT;
 
   if (update.updateType === 'bot_started') {
     return compact([
       dialogAction(update, true),
-      sendAction(update, messageBody(WELCOME_TEXT, webApp), 'welcome', welcomeActionKey(update)),
+      sendAction(
+        update,
+        messageBody(welcomeText, webApp, includeAdmin),
+        'welcome',
+        welcomeActionKey(update),
+      ),
     ]);
   }
 
@@ -184,7 +233,9 @@ export function planBotActions(
   if (update.updateType === 'message_callback') {
     return compact([
       dialogAction(update, true),
-      answerCallbackAction(update, { message: messageBody(CALLBACK_TEXT, webApp) }),
+      answerCallbackAction(update, {
+        message: messageBody(CALLBACK_TEXT, webApp, includeAdmin),
+      }),
     ]);
   }
 
@@ -194,20 +245,26 @@ export function planBotActions(
   if (START_COMMAND_PATTERN.test(text)) {
     return compact([
       dialogAction(update, true),
-      sendAction(update, messageBody(WELCOME_TEXT, webApp), 'welcome', welcomeActionKey(update)),
+      sendAction(
+        update,
+        messageBody(welcomeText, webApp, includeAdmin),
+        'welcome',
+        welcomeActionKey(update),
+      ),
     ]);
   }
 
   if (text.length === 0) {
     return compact([
       dialogAction(update, true),
-      sendAction(update, messageBody(TEXT_REQUIRED_TEXT, webApp), 'text_required'),
+      sendAction(update, messageBody(TEXT_REQUIRED_TEXT, webApp, includeAdmin), 'text_required'),
     ]);
   }
 
-  const isManagerContact = text.localeCompare(MANAGER_CONTACT_PHRASE, 'ru', {
-    sensitivity: 'accent',
-  }) === 0;
+  const isManagerContact =
+    text.localeCompare(MANAGER_CONTACT_PHRASE, 'ru', {
+      sensitivity: 'accent',
+    }) === 0;
 
   const inquiry: BotSaveInquiryAction | null =
     update.chatId !== null && update.actorUserId !== null && update.messageId !== null
@@ -227,7 +284,7 @@ export function planBotActions(
     inquiry,
     sendAction(
       update,
-      messageBody(isManagerContact ? MANAGER_HANDOFF_TEXT : ROUTING_TEXT, webApp),
+      messageBody(isManagerContact ? MANAGER_HANDOFF_TEXT : ROUTING_TEXT, webApp, includeAdmin),
       isManagerContact ? 'manager_handoff' : 'route_message',
     ),
   ]);

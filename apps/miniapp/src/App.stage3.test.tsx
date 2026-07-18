@@ -37,6 +37,7 @@ function installMaxBridge(): MaxWebAppBridge {
     requestContact: vi.fn(),
     openLink: vi.fn(),
     openMaxLink: vi.fn(),
+    close: vi.fn(),
   } as MaxWebAppBridge;
   window.WebApp = webApp;
   return webApp;
@@ -135,7 +136,8 @@ describe('App Stage 3 runtime', () => {
 
     resolveDraftRequest(jsonResponse({ draft: null }));
     expect(await screen.findByText('MAX · защищённая сессия')).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/max')).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/leads/draft')).toBe(true);
     expect(screen.getByRole('heading', { name: 'Новый проект' })).toBeTruthy();
     expect(window.location.hash).toBe('#brief');
   });
@@ -252,9 +254,10 @@ describe('App Stage 3 runtime', () => {
     await waitFor(() => expect(webApp.openLink).toHaveBeenCalledWith(downloadUrl));
   });
 
-  it('opens the manager phone dialer from the home screen when configured', async () => {
+  it('opens the configured manager profile before native-id and phone fallbacks', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
+    vi.stubEnv('VITE_MAX_MANAGER_PROFILE_URL', 'https://max.ru/u/Manager_token-123');
     vi.stubEnv('VITE_MAX_MANAGER_PHONE', '+79220063645');
     vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '61096226');
     vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
@@ -264,57 +267,72 @@ describe('App Stage 3 runtime', () => {
     const { App } = await import('./App.js');
     render(<App />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
+    await userEvent.click(screen.getByRole('button', { name: /менеджер/i }));
 
-    // Phone path uses tel: via DOM, not openMaxLink
-    expect(webApp.openMaxLink).not.toHaveBeenCalled();
+    expect(webApp.openMaxLink).toHaveBeenCalledOnce();
+    expect(webApp.openMaxLink).toHaveBeenCalledWith('https://max.ru/u/Manager_token-123');
+    expect(webApp.close).not.toHaveBeenCalled();
     expect(screen.queryByText(/Не удалось открыть/)).toBeNull();
   });
 
-  it('shows a safe fallback when the MAX manager link is not configured', async () => {
+  it('does not substitute the bot profile when manager contacts are not configured', async () => {
     vi.resetModules();
+    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
+    vi.stubEnv('VITE_MAX_MANAGER_PROFILE_URL', '');
+    vi.stubEnv('VITE_MAX_MANAGER_PHONE', '');
+    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '');
     vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
     vi.stubEnv('VITE_CONSENT_VERSION', '');
-    vi.doMock('./runtime/bot-config.js', () => ({
-      maxBotConfiguration: {
-        url: null,
-        managerPhone: null,
-        managerUrl: null,
-        managerUserId: null,
-      },
-      resolveMaxBotConfiguration: () => ({
-        url: null,
-        managerPhone: null,
-        managerUrl: null,
-        managerUserId: null,
-      }),
-    }));
     const webApp = installMaxBridge();
 
     const { App } = await import('./App.js');
     render(<App />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
+    await userEvent.click(screen.getByRole('button', { name: /менеджер/i }));
 
     expect(webApp.openMaxLink).not.toHaveBeenCalled();
-    expect(screen.getByText(/Чат с менеджером временно недоступен/)).toBeTruthy();
-    vi.doUnmock('./runtime/bot-config.js');
+    expect(screen.getByText(/Профиль менеджера в MAX временно недоступен/)).toBeTruthy();
   });
 
-  it('falls back to the MAX user deep-link when phone is not configured', async () => {
+  it('uses the native MAX user profile before the configured phone fallback', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
-    vi.stubEnv('VITE_MAX_MANAGER_PHONE', '');
+    vi.stubEnv('VITE_MAX_MANAGER_PROFILE_URL', '');
+    vi.stubEnv('VITE_MAX_MANAGER_PHONE', '+79220063645');
     vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '61096226');
     vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
     vi.stubEnv('VITE_CONSENT_VERSION', '');
     const webApp = installMaxBridge();
+    const browserOpen = vi.spyOn(window, 'open').mockReturnValue({} as Window);
 
     const { App } = await import('./App.js');
     render(<App />);
 
-    await userEvent.click(screen.getByRole('button', { name: /Связаться с менеджером/ }));
+    await userEvent.click(screen.getByRole('button', { name: /менеджер/i }));
 
-    expect(webApp.openMaxLink).toHaveBeenCalledWith('https://max.ru/61096226');
+    expect(webApp.openMaxLink).toHaveBeenCalledWith('max://user/61096226');
+    expect(browserOpen).not.toHaveBeenCalled();
+    expect(webApp.close).not.toHaveBeenCalled();
+  });
+
+  it('uses the phone only when manager profile links are unavailable', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
+    vi.stubEnv('VITE_MAX_MANAGER_PROFILE_URL', '');
+    vi.stubEnv('VITE_MAX_MANAGER_PHONE', '+79220063645');
+    vi.stubEnv('VITE_MAX_MANAGER_USER_ID', '');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL', '');
+    vi.stubEnv('VITE_CONSENT_VERSION', '');
+    const webApp = installMaxBridge();
+    const browserOpen = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+
+    const { App } = await import('./App.js');
+    render(<App />);
+
+    await userEvent.click(screen.getByRole('button', { name: /менеджер/i }));
+
+    expect(webApp.openMaxLink).not.toHaveBeenCalled();
+    expect(browserOpen).toHaveBeenCalledWith('tel:+79220063645', '_blank', 'noopener,noreferrer');
+    expect(webApp.close).not.toHaveBeenCalled();
   });
 });

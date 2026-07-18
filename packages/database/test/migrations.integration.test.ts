@@ -43,16 +43,24 @@ const secureUploadsEntry = migrationJournal.entries.find(
 const trackerOutboxEntry = migrationJournal.entries.find(
   ({ tag }) => tag === '0004_stage6_tracker_outbox',
 );
+const adminFoundationEntry = migrationJournal.entries.find(
+  ({ tag }) => tag === '0005_admin_foundation',
+);
+const caseCatalogSeedEntry = migrationJournal.entries.find(
+  ({ tag }) => tag === '0006_seed_case_catalog',
+);
 
 if (
   initialEntry === undefined ||
   runtimeEntry === undefined ||
   botWebhookEntry === undefined ||
   secureUploadsEntry === undefined ||
-  trackerOutboxEntry === undefined
+  trackerOutboxEntry === undefined ||
+  adminFoundationEntry === undefined ||
+  caseCatalogSeedEntry === undefined
 ) {
   throw new Error(
-    'Expected migration journal entries from 0000_initial through 0004_stage6_tracker_outbox',
+    'Expected migration journal entries from 0000_initial through 0006_seed_case_catalog',
   );
 }
 
@@ -61,11 +69,15 @@ const runtimeSqlUrl = new URL('../drizzle/0001_stage3_runtime.sql', import.meta.
 const botWebhookSqlUrl = new URL('../drizzle/0002_stage4_bot_webhook.sql', import.meta.url);
 const secureUploadsSqlUrl = new URL('../drizzle/0003_stage5_secure_uploads.sql', import.meta.url);
 const trackerOutboxSqlUrl = new URL('../drizzle/0004_stage6_tracker_outbox.sql', import.meta.url);
+const adminFoundationSqlUrl = new URL('../drizzle/0005_admin_foundation.sql', import.meta.url);
+const caseCatalogSeedSqlUrl = new URL('../drizzle/0006_seed_case_catalog.sql', import.meta.url);
 const initialMigrationSql = readFileSync(initialSqlUrl, 'utf8');
 const runtimeMigrationSql = readFileSync(runtimeSqlUrl, 'utf8');
 const botWebhookMigrationSql = readFileSync(botWebhookSqlUrl, 'utf8');
 const secureUploadsMigrationSql = readFileSync(secureUploadsSqlUrl, 'utf8');
 const trackerOutboxMigrationSql = readFileSync(trackerOutboxSqlUrl, 'utf8');
+const adminFoundationMigrationSql = readFileSync(adminFoundationSqlUrl, 'utf8');
+const caseCatalogSeedMigrationSql = readFileSync(caseCatalogSeedSqlUrl, 'utf8');
 const secureUploadsPreflightSql = secureUploadsMigrationSql.split('--> statement-breakpoint')[0];
 const trackerOutboxPreflightSql = trackerOutboxMigrationSql.split('--> statement-breakpoint')[0];
 if (secureUploadsPreflightSql === undefined || trackerOutboxPreflightSql === undefined) {
@@ -79,6 +91,12 @@ const secureUploadsMigrationHash = createHash('sha256')
   .digest('hex');
 const trackerOutboxMigrationHash = createHash('sha256')
   .update(trackerOutboxMigrationSql)
+  .digest('hex');
+const adminFoundationMigrationHash = createHash('sha256')
+  .update(adminFoundationMigrationSql)
+  .digest('hex');
+const caseCatalogSeedMigrationHash = createHash('sha256')
+  .update(caseCatalogSeedMigrationSql)
   .digest('hex');
 const initialDownMigration = readFileSync(
   new URL('../drizzle/rollback/0000_initial.down.sql', import.meta.url),
@@ -100,6 +118,14 @@ const trackerOutboxDownMigration = readFileSync(
   new URL('../drizzle/rollback/0004_stage6_tracker_outbox.down.sql', import.meta.url),
   'utf8',
 );
+const adminFoundationDownMigration = readFileSync(
+  new URL('../drizzle/rollback/0005_admin_foundation.down.sql', import.meta.url),
+  'utf8',
+);
+const caseCatalogSeedDownMigration = readFileSync(
+  new URL('../drizzle/rollback/0006_seed_case_catalog.down.sql', import.meta.url),
+  'utf8',
+);
 const sessionEvidenceColumns = `
   "consent_version", "consent_text_hash", "consent_client_accepted_at", "consented_at",
   "terms_version", "terms_text_hash", "terms_client_accepted_at", "terms_accepted_at"`;
@@ -110,6 +136,184 @@ const submissionEvidenceColumns = `
   "consent_text_hash", "terms_version", "terms_text_hash", "terms_accepted_at"`;
 const submissionEvidenceValues = `
   repeat('a', 64), 'test-v1', repeat('b', 64), now()`;
+
+interface SeededCaseFixture {
+  readonly id: string;
+  readonly title: string;
+  readonly url: string;
+  readonly image: string;
+  readonly city: string;
+  readonly region: string;
+  readonly categories: readonly string[];
+  readonly services: readonly string[];
+  readonly area: number | null;
+  readonly scale: string;
+  readonly constructionKind: string;
+  readonly status: string;
+  readonly tags: readonly string[];
+  readonly published: boolean;
+  readonly sortOrder: number;
+  readonly version: number;
+}
+
+const seededCaseFixtures: readonly SeededCaseFixture[] = [
+  {
+    id: 'businesshouse',
+    title: 'Бизнес-центр на Герцена',
+    url: 'https://craft72.ru/businesshouse',
+    image: 'https://static.tildacdn.com/tild6165-3531-4166-a265-656533383936/_-94.jpg',
+    city: 'Тюмень',
+    region: 'Тюменская область',
+    categories: ['office', 'commercial'],
+    services: ['urban-planning', 'architecture'],
+    area: 42_000,
+    scale: 'large-object',
+    constructionKind: 'new-construction',
+    status: 'Проект',
+    tags: ['business-center', 'mixed-use'],
+    published: true,
+    sortOrder: 0,
+    version: 1,
+  },
+  {
+    id: 'sportscentertsimlyanskoe',
+    title: 'Многофункциональный спортивный центр оз. Цимлянское',
+    url: 'https://craft72.ru/sportscentertsimlyanskoe',
+    image: 'https://static.tildacdn.com/tild6162-6234-4263-a333-303736326161/__-76.jpg',
+    city: 'Тюмень',
+    region: 'Тюменская область',
+    categories: ['public-building', 'sports-infrastructure'],
+    services: ['urban-planning', 'architecture', 'general-design'],
+    area: 800_000,
+    scale: 'territory',
+    constructionKind: 'new-construction',
+    status: 'Согласован',
+    tags: ['sports', 'landscape'],
+    published: true,
+    sortOrder: 1,
+    version: 1,
+  },
+  {
+    id: 'childcenter',
+    title: 'Детский досуговый центр',
+    url: 'https://craft72.ru/childcenter',
+    image: 'https://static.tildacdn.com/tild6137-3636-4936-b365-326232316539/__-74.jpg',
+    city: 'Тобольск',
+    region: 'Тюменская область',
+    categories: ['public-building', 'social-infrastructure'],
+    services: ['architecture', 'general-design'],
+    area: 1_450,
+    scale: 'single-object',
+    constructionKind: 'new-construction',
+    status: 'Согласован',
+    tags: ['family', 'public-space'],
+    published: true,
+    sortOrder: 2,
+    version: 1,
+  },
+  {
+    id: 'citypumpingstation',
+    title: 'Ансамбль городской насосной станции',
+    url: 'https://craft72.ru/citypumpingstation',
+    image: 'https://static.tildacdn.com/tild6164-3938-4934-b465-323764656430/__-82.jpg',
+    city: 'Тобольск',
+    region: 'Тюменская область',
+    categories: ['cultural-heritage', 'public-building'],
+    services: ['restoration', 'architecture', 'general-design', 'expertise-support'],
+    area: 3_500,
+    scale: 'single-object',
+    constructionKind: 'cultural-heritage',
+    status: 'Проектная документация',
+    tags: ['heritage', 'adaptation'],
+    published: true,
+    sortOrder: 3,
+    version: 1,
+  },
+  {
+    id: 'gagarinsky',
+    title: 'Жилой комплекс «Гагаринский»',
+    url: 'https://craft72.ru/gagarinsky',
+    image: 'https://static.tildacdn.com/tild3262-3037-4934-b932-353130623935/__-92.jpg',
+    city: 'Тюмень',
+    region: 'Тюменская область',
+    categories: ['residential'],
+    services: ['architecture'],
+    area: 20_000,
+    scale: 'large-object',
+    constructionKind: 'new-construction',
+    status: 'Согласовано',
+    tags: ['residential', 'architectural-lighting'],
+    published: true,
+    sortOrder: 4,
+    version: 1,
+  },
+  {
+    id: 'zemstvoschool',
+    title: 'Здание «Земской школы»',
+    url: 'https://craft72.ru/zemstvoschool',
+    image: 'https://static.tildacdn.com/tild3166-3861-4130-a238-313364653238/__-90.jpg',
+    city: 'Екатеринбург',
+    region: 'Свердловская область',
+    categories: ['cultural-heritage', 'public-building'],
+    services: ['restoration', 'architecture'],
+    area: null,
+    scale: 'single-object',
+    constructionKind: 'cultural-heritage',
+    status: 'Проект',
+    tags: ['heritage', 'school'],
+    published: true,
+    sortOrder: 5,
+    version: 1,
+  },
+  {
+    id: 'industrialpark',
+    title: 'Индустриальный парк',
+    url: 'https://craft72.ru/industrialpark',
+    image: 'https://static.tildacdn.com/tild3332-6236-4564-b261-663036663337/__1-90.jpg',
+    city: 'Тюмень',
+    region: 'Тюменская область',
+    categories: ['industrial'],
+    services: ['urban-planning', 'architecture'],
+    area: 48_000,
+    scale: 'territory',
+    constructionKind: 'new-construction',
+    status: 'Согласовано',
+    tags: ['industrial', 'masterplan'],
+    published: true,
+    sortOrder: 6,
+    version: 1,
+  },
+  {
+    id: 'masterplan',
+    title: 'Мастер-план туристического каркаса города',
+    url: 'https://craft72.ru/masterplan',
+    image: 'https://static.tildacdn.com/tild3930-3737-4466-a663-643430316238/__-27.jpg',
+    city: 'Тобольск',
+    region: 'Тюменская область',
+    categories: ['hospitality', 'urban-development'],
+    services: ['urban-planning', 'architecture'],
+    area: null,
+    scale: 'territory',
+    constructionKind: 'new-construction',
+    status: 'Согласование проекта',
+    tags: ['masterplan', 'tourism'],
+    published: true,
+    sortOrder: 7,
+    version: 1,
+  },
+];
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function sqlString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function sqlTextArray(values: readonly string[]): string {
+  return `ARRAY[${values.map(sqlString).join(', ')}]::text[]`;
+}
 
 function makeInitialMigrationFolder(): string {
   const directory = mkdtempSync(join(tmpdir(), 'craft72-initial-migration-'));
@@ -196,6 +400,79 @@ describe('migration rollback metadata', () => {
       'Stage 6 Tracker outbox rollback refused: unexpected migration ledger entries exist',
     );
   });
+
+  it('anchors the admin rollback and refuses to discard managed data', () => {
+    for (const [entry, hash] of [
+      [initialEntry, initialMigrationHash],
+      [runtimeEntry, runtimeMigrationHash],
+      [botWebhookEntry, botWebhookMigrationHash],
+      [secureUploadsEntry, secureUploadsMigrationHash],
+      [trackerOutboxEntry, trackerOutboxMigrationHash],
+      [adminFoundationEntry, adminFoundationMigrationHash],
+    ] as const) {
+      expect(adminFoundationDownMigration).toContain(`WHERE "created_at" = ${entry.when}`);
+      expect(adminFoundationDownMigration).toContain(`AND "hash" = '${hash}'`);
+    }
+    expect(adminFoundationDownMigration).toContain(
+      'Admin foundation rollback refused: admin-managed data exists',
+    );
+    expect(adminFoundationDownMigration).toContain(
+      'Admin foundation rollback refused: unexpected migration ledger entries exist',
+    );
+  });
+
+  it('seeds the exact curated portfolio without overwriting admin-owned rows', () => {
+    expect(seededCaseFixtures).toHaveLength(8);
+    expect(caseCatalogSeedMigrationSql).toContain('ON CONFLICT ("id") DO NOTHING;');
+
+    for (const fixture of seededCaseFixtures) {
+      const tupleValues = [
+        sqlString(fixture.id),
+        sqlString(fixture.title),
+        sqlString(fixture.url),
+        sqlString(fixture.image),
+        sqlString(fixture.city),
+        sqlString(fixture.region),
+        sqlTextArray(fixture.categories),
+        sqlTextArray(fixture.services),
+        fixture.area === null ? 'NULL' : String(fixture.area),
+        sqlString(fixture.scale),
+        sqlString(fixture.constructionKind),
+        sqlString(fixture.status),
+        sqlTextArray(fixture.tags),
+        String(fixture.published),
+        String(fixture.sortOrder),
+        String(fixture.version),
+        sqlString('2026-07-18 05:13:36.909+00'),
+        sqlString('2026-07-18 05:13:36.909+00'),
+      ];
+      const tuplePattern = new RegExp(
+        `\\(\\s*${tupleValues.map(escapeRegularExpression).join(',\\s*')}\\s*\\)`,
+        'u',
+      );
+
+      expect(caseCatalogSeedMigrationSql).toMatch(tuplePattern);
+    }
+
+    for (const [entry, hash] of [
+      [initialEntry, initialMigrationHash],
+      [runtimeEntry, runtimeMigrationHash],
+      [botWebhookEntry, botWebhookMigrationHash],
+      [secureUploadsEntry, secureUploadsMigrationHash],
+      [trackerOutboxEntry, trackerOutboxMigrationHash],
+      [adminFoundationEntry, adminFoundationMigrationHash],
+      [caseCatalogSeedEntry, caseCatalogSeedMigrationHash],
+    ] as const) {
+      expect(caseCatalogSeedDownMigration).toContain(`WHERE "created_at" = ${entry.when}`);
+      expect(caseCatalogSeedDownMigration).toContain(`AND "hash" = '${hash}'`);
+    }
+    expect(caseCatalogSeedDownMigration).toContain(
+      'Case catalog seed rollback refused: seeded cases contain admin-managed changes',
+    );
+    expect(caseCatalogSeedDownMigration).toContain(
+      'Case catalog seed rollback refused: unexpected migration ledger entries exist',
+    );
+  });
 });
 
 describeWithDatabase('PostgreSQL migrations', () => {
@@ -266,8 +543,12 @@ describeWithDatabase('PostgreSQL migrations', () => {
         order by table_name`,
       [
         [
+          'admin_audit_log',
+          'admin_sessions',
           'bot_dialogs',
           'bot_inquiries',
+          'case_catalog_items',
+          'content_documents',
           'document_access_grants',
           'document_scan_jobs',
           'documents',
@@ -283,8 +564,12 @@ describeWithDatabase('PostgreSQL migrations', () => {
       ],
     );
     expect(createdTables.rows.map(({ table_name: tableName }) => tableName)).toEqual([
+      'admin_audit_log',
+      'admin_sessions',
       'bot_dialogs',
       'bot_inquiries',
+      'case_catalog_items',
+      'content_documents',
       'document_access_grants',
       'document_scan_jobs',
       'documents',
@@ -297,6 +582,29 @@ describeWithDatabase('PostgreSQL migrations', () => {
       'upload_sessions',
       'webhook_inbox',
     ]);
+
+    const seededCases = await pool.query<SeededCaseFixture>(
+      `select
+         "id",
+         "title",
+         "url",
+         "image",
+         "city",
+         "region",
+         "categories",
+         "services",
+         "area_sqm"::float8 as "area",
+         "scale",
+         "construction_kind" as "constructionKind",
+         "status",
+         "tags",
+         "published",
+         "sort_order" as "sortOrder",
+         "version"
+       from "public"."case_catalog_items"
+       order by "sort_order", "id"`,
+    );
+    expect(seededCases.rows).toEqual(seededCaseFixtures);
 
     const stageThreeColumns = await pool.query<{
       table_name: string;
@@ -1038,6 +1346,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
       { created_at: String(botWebhookEntry.when), hash: botWebhookMigrationHash },
       { created_at: String(secureUploadsEntry.when), hash: secureUploadsMigrationHash },
       { created_at: String(trackerOutboxEntry.when), hash: trackerOutboxMigrationHash },
+      { created_at: String(adminFoundationEntry.when), hash: adminFoundationMigrationHash },
+      { created_at: String(caseCatalogSeedEntry.when), hash: caseCatalogSeedMigrationHash },
     ]);
 
     await expect(pool.query(initialDownMigration)).rejects.toThrow(
@@ -1059,6 +1369,67 @@ describeWithDatabase('PostgreSQL migrations', () => {
       /unexpected migration ledger entries exist/u,
     );
     await pool.query('rollback');
+
+    await expect(pool.query(adminFoundationDownMigration)).rejects.toThrow(
+      /unexpected migration ledger entries exist/u,
+    );
+    await pool.query('rollback');
+
+    await pool.query(caseCatalogSeedDownMigration);
+    const seededCasesAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from "public"."case_catalog_items"`,
+    );
+    const seedLedgerAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from "drizzle"."__drizzle_migrations"
+        where "created_at" = $1`,
+      [caseCatalogSeedEntry.when],
+    );
+    expect(seededCasesAfterRollback.rows[0]?.count).toBe('0');
+    expect(seedLedgerAfterRollback.rows[0]?.count).toBe('0');
+
+    await pool.query(
+      `insert into "drizzle"."__drizzle_migrations" ("hash", "created_at")
+       values ($1, $2)`,
+      ['future-admin-migration-test-entry', adminFoundationEntry.when + 1],
+    );
+    await expect(pool.query(adminFoundationDownMigration)).rejects.toThrow(
+      /unexpected migration ledger entries exist/u,
+    );
+    await pool.query('rollback');
+    await pool.query(
+      `delete from "drizzle"."__drizzle_migrations"
+        where "created_at" = $1`,
+      [adminFoundationEntry.when + 1],
+    );
+
+    await pool.query(adminFoundationDownMigration);
+
+    const adminTablesAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from information_schema.tables
+        where table_schema = 'public'
+          and table_name = any($1::text[])`,
+      [['admin_audit_log', 'admin_sessions', 'case_catalog_items', 'content_documents']],
+    );
+    const adminColumnsAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'submissions'
+          and column_name = any($1::text[])`,
+      [['review_status', 'admin_note']],
+    );
+    const adminLedgerAfterRollback = await pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from "drizzle"."__drizzle_migrations"
+        where "created_at" = $1`,
+      [adminFoundationEntry.when],
+    );
+    expect(adminTablesAfterRollback.rows[0]?.count).toBe('0');
+    expect(adminColumnsAfterRollback.rows[0]?.count).toBe('0');
+    expect(adminLedgerAfterRollback.rows[0]?.count).toBe('0');
 
     await pool.query(
       `insert into "drizzle"."__drizzle_migrations" ("hash", "created_at")
@@ -1245,6 +1616,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
           botWebhookEntry.when,
           secureUploadsEntry.when,
           trackerOutboxEntry.when,
+          adminFoundationEntry.when,
+          caseCatalogSeedEntry.when,
         ],
       ],
     );
@@ -1267,6 +1640,8 @@ describeWithDatabase('PostgreSQL migrations', () => {
           'max_bot_outbox_status',
           'project_scope',
           'submission_status',
+          'submission_review_status',
+          'content_document_kind',
           'upload_session_status',
           'webhook_inbox_status',
         ],

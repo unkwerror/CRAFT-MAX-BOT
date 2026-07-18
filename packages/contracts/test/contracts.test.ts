@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AdminAuthResponseSchema,
+  AdminContentDocumentSchema,
+  AdminSubmissionUpdateRequestSchema,
+  AdminUserListItemSchema,
   ApiErrorResponseSchema,
   CaseCatalogItemSchema,
   CaseCatalogQuerySchema,
@@ -97,13 +101,18 @@ const validLead: LeadFormData = {
 };
 
 describe('start_param', () => {
-  it.each(['new_project', 'services', 'portfolio', 'upload_brief', 'source_summer-2026'])(
-    'accepts %s',
-    (value) => {
-      const parsed: StartParam = StartParamSchema.parse(value);
-      expect(parsed).toBe(value);
-    },
-  );
+  it.each([
+    'home',
+    'new_project',
+    'services',
+    'portfolio',
+    'upload_brief',
+    'admin',
+    'source_summer-2026',
+  ])('accepts %s', (value) => {
+    const parsed: StartParam = StartParamSchema.parse(value);
+    expect(parsed).toBe(value);
+  });
 
   it.each([
     'unknown',
@@ -255,6 +264,93 @@ describe('MAX authentication and contact verification', () => {
         verifiedAt: NOW,
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('admin contracts', () => {
+  it('keeps the session credential out of the browser-readable auth response', () => {
+    const response = {
+      authenticated: true,
+      user: {
+        id: '61096226',
+        firstName: 'Администратор',
+        lastName: null,
+        username: null,
+        languageCode: 'ru',
+        photoUrl: null,
+      },
+      expiresAt: LATER,
+    } as const;
+
+    expect(AdminAuthResponseSchema.safeParse(response).success).toBe(true);
+    expect(AdminAuthResponseSchema.safeParse({ ...response, token: SESSION_TOKEN }).success).toBe(
+      false,
+    );
+  });
+
+  it('allows only review metadata to change on an immutable submitted intake', () => {
+    expect(
+      AdminSubmissionUpdateRequestSchema.safeParse({
+        expectedUpdatedAt: NOW,
+        reviewStatus: 'in_review',
+        adminNote: 'Перезвонить в понедельник',
+      }).success,
+    ).toBe(true);
+    expect(
+      AdminSubmissionUpdateRequestSchema.safeParse({
+        expectedUpdatedAt: NOW,
+        intake: validLead,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('models questionnaire content as separate draft and published revisions', () => {
+    expect(
+      AdminContentDocumentSchema.safeParse({
+        key: 'lead-questionnaire',
+        kind: 'questionnaire',
+        draft: { steps: [{ id: 'role', title: 'Ваша роль' }] },
+        published: { steps: [{ id: 'role', title: 'Выберите роль' }] },
+        version: 3,
+        publishedVersion: 2,
+        publishedAt: NOW,
+        createdAt: NOW,
+        updatedAt: LATER,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('represents bot-only identities without inventing a personal profile', () => {
+    expect(
+      AdminUserListItemSchema.safeParse({
+        maxUserId: '70000001',
+        displayName: 'Пользователь MAX',
+        identitySource: 'bot',
+        user: null,
+        createdAt: NOW,
+        updatedAt: LATER,
+        submissionCount: 0,
+        lastSubmissionAt: null,
+        hasActiveDraft: false,
+        botDialogCount: 2,
+        lastBotEventAt: LATER,
+      }).success,
+    ).toBe(true);
+    expect(
+      AdminUserListItemSchema.safeParse({
+        maxUserId: '70000001',
+        displayName: 'Выдуманное имя',
+        identitySource: 'bot',
+        user: null,
+        createdAt: NOW,
+        updatedAt: LATER,
+        submissionCount: 0,
+        lastSubmissionAt: null,
+        hasActiveDraft: false,
+        botDialogCount: 1,
+        lastBotEventAt: LATER,
+      }).success,
+    ).toBe(false);
   });
 });
 

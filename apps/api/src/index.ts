@@ -1,6 +1,8 @@
 import { parseServerEnvironment } from '@craft72/config';
 import { createDatabaseClient } from '@craft72/database';
 
+import { buildAdminApiModule } from './admin-api.js';
+import { PostgresAdminStore } from './admin-repository.js';
 import { ClamAvScanner } from './clamav.js';
 import { PrivateFileStorage } from './file-storage.js';
 import { PostgresStage3Store } from './repository.js';
@@ -21,6 +23,9 @@ const store = new PostgresStage3Store(databaseClient.db, {
   sessionTtlSeconds: environment.SESSION_TTL_SECONDS,
   draftTtlSeconds: environment.DRAFT_TTL_SECONDS,
   submissionRetentionDays: environment.SUBMISSION_RETENTION_DAYS,
+});
+const adminStore = new PostgresAdminStore(databaseClient.db, {
+  sessionTtlSeconds: environment.ADMIN_SESSION_TTL_SECONDS,
 });
 const fileStorage = new PrivateFileStorage({
   maximumBytes: environment.UPLOAD_MAX_BYTES,
@@ -49,6 +54,13 @@ const uploads = new SecureUploadService(databaseClient.db, {
   uploadLeaseSeconds: environment.UPLOAD_LEASE_SECONDS,
 });
 const app = await buildStage3Api({
+  admin: buildAdminApiModule({
+    allowedMaxUserIds: environment.ADMIN_MAX_USER_IDS,
+    botToken: environment.MAX_BOT_TOKEN,
+    initDataMaxAgeSeconds: environment.MAX_INIT_DATA_MAX_AGE_SECONDS,
+    publicBaseUrl: environment.PUBLIC_BASE_URL,
+    store: adminStore,
+  }),
   store,
   uploads,
   botToken: environment.MAX_BOT_TOKEN,
@@ -128,11 +140,13 @@ try {
   await uploads.initialize();
   await uploads.cleanupExpired();
   await store.cleanupExpired();
+  await adminStore.cleanupExpired();
   await app.listen({ host: environment.API_HOST, port: environment.API_PORT });
   cleanupTimer = setInterval(() => {
     void (async () => {
       await uploads.cleanupExpired();
       await store.cleanupExpired();
+      await adminStore.cleanupExpired();
     })().catch((error: unknown) => {
       app.log.error(
         { errorName: error instanceof Error ? error.name : 'UnknownError' },

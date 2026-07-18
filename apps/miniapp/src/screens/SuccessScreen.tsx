@@ -39,8 +39,8 @@ export const SuccessScreen = ({
       </span>
       <h1>Заявка принята</h1>
       <p>
-        Спасибо! Менеджер КРАФТ напишет вам в MAX. Сохраните номер заявки — по нему удобно
-        уточнять статус.
+        Спасибо! Менеджер КРАФТ напишет вам в MAX. Сохраните номер заявки — по нему удобно уточнять
+        статус.
       </p>
       <div className="submission-id">
         <span>Номер заявки</span>
@@ -97,12 +97,7 @@ export const SuccessScreen = ({
     </div>
 
     <div className="success-actions">
-      <Button
-        className="success-actions__primary"
-        onClick={onOpenChat}
-        size="large"
-        type="button"
-      >
+      <Button className="success-actions__primary" onClick={onOpenChat} size="large" type="button">
         Написать менеджеру
       </Button>
       <Button mode="secondary" onClick={onHome} size="large" type="button">

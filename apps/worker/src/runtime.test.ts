@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { JsonObject } from '@craft72/database';
+
 import { MaxApiClient } from './max-api.js';
 import type {
   BotWorkerStore,
@@ -19,9 +21,16 @@ class MemoryWorkerStore implements BotWorkerStore {
   public completedWebhook: WebhookProcessingResult | null = null;
   public outboundFailure: { errorCode: string; retryAt: Date | null } | null = null;
   public webhookFailure: { errorCode: string; retryAt: Date | null } | null = null;
+  public publishedContent: JsonObject | null = null;
+  public publishedContentError: Error | null = null;
 
   public async isReady(): Promise<void> {
     return undefined;
+  }
+
+  public async getPublishedContent(): Promise<JsonObject | null> {
+    if (this.publishedContentError !== null) throw this.publishedContentError;
+    return this.publishedContent;
   }
 
   public async claimWebhook(): Promise<ClaimedWebhook | null> {
@@ -90,6 +99,63 @@ function options(store: MemoryWorkerStore, fetch: typeof globalThis.fetch) {
 }
 
 describe('Stage 4 worker cycle', () => {
+  it('uses a valid published bot-welcome document for bot_started', async () => {
+    const store = new MemoryWorkerStore();
+    store.publishedContent = { text: '  Добро пожаловать в КРАФТ!  ' };
+    store.webhook = {
+      attempts: 1,
+      chatId: 182182182n,
+      eventKey: 'max:bot_started:published-welcome',
+      eventType: 'bot_started',
+      payload: {
+        chat_id: 182182182,
+        timestamp: NOW.getTime(),
+        update_type: 'bot_started',
+        user: { user_id: 123456789, first_name: 'Иван', is_bot: false },
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ message: { body: { mid: 'mid.welcome' } } })),
+    );
+
+    await runWorkerCycle(options(store, fetchMock));
+
+    expect(store.completedWebhook?.actions[0]?.payload).toMatchObject({
+      text: 'Добро пожаловать в КРАФТ!',
+    });
+    expect(store.completedWebhook?.actions[0]?.payload).toHaveProperty('attachments');
+  });
+
+  it.each([
+    ['invalid document', { text: '   ' }, null],
+    ['read failure', null, new Error('database unavailable')],
+  ])('falls back to the built-in greeting after a %s', async (_case, content, readError) => {
+    const store = new MemoryWorkerStore();
+    store.publishedContent = content;
+    store.publishedContentError = readError;
+    store.webhook = {
+      attempts: 1,
+      chatId: 182182182n,
+      eventKey: `max:bot_started:${_case}`,
+      eventType: 'bot_started',
+      payload: {
+        chat_id: 182182182,
+        timestamp: NOW.getTime(),
+        update_type: 'bot_started',
+        user: { user_id: 123456789, first_name: 'Иван', is_bot: false },
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ message: { body: { mid: 'mid.welcome' } } })),
+    );
+
+    await runWorkerCycle(options(store, fetchMock));
+
+    expect(store.completedWebhook?.actions[0]?.payload.text).toMatch(
+      /Здравствуйте![\s\S]*проектного бюро КРАФТ/,
+    );
+  });
+
   it('turns one free-text webhook into one inquiry and one delivered outbox action', async () => {
     const store = new MemoryWorkerStore();
     store.webhook = {

@@ -4,10 +4,12 @@ import { getRouteFromStartParam } from './navigation.js';
 
 describe('authenticated MAX start parameter routing', () => {
   it.each([
+    ['home', 'home'],
     ['new_project', 'brief'],
     ['services', 'finder'],
     ['portfolio', 'cases'],
     ['upload_brief', 'upload'],
+    ['admin', 'admin'],
   ] as const)('maps %s to %s', (startParam, expectedRoute) => {
     expect(getRouteFromStartParam(startParam)).toBe(expectedRoute);
   });

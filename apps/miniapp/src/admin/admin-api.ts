@@ -1,0 +1,248 @@
+import {
+  AdminAuthRequestSchema,
+  AdminAuthResponseSchema,
+  AdminCaseCreateRequestSchema,
+  AdminCaseListResponseSchema,
+  AdminCaseResponseSchema,
+  AdminCaseUpdateRequestSchema,
+  AdminContentCreateRequestSchema,
+  AdminContentListResponseSchema,
+  AdminContentPublishRequestSchema,
+  AdminContentResponseSchema,
+  AdminContentUpdateRequestSchema,
+  AdminSessionResponseSchema,
+  AdminSubmissionListResponseSchema,
+  AdminSubmissionResponseSchema,
+  AdminSubmissionUpdateRequestSchema,
+  AdminUserListResponseSchema,
+  ApiErrorResponseSchema,
+  type AdminAuthResponse,
+  type AdminCase,
+  type AdminCaseCreateRequest,
+  type AdminCaseUpdateRequest,
+  type AdminContentCreateRequest,
+  type AdminContentDocument,
+  type AdminContentUpdateRequest,
+  type AdminSessionResponse,
+  type AdminSubmissionListItem,
+  type AdminSubmissionUpdateRequest,
+  type AdminUserListItem,
+} from '@craft72/contracts/source';
+
+interface RuntimeSchema<T> {
+  safeParse(
+    input: unknown,
+  ): { readonly success: true; readonly data: T } | { readonly success: false };
+}
+
+export class AdminApiError extends Error {
+  public readonly code: string;
+  public readonly status: number;
+
+  public constructor(status: number, code: string) {
+    super(code);
+    this.name = 'AdminApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+const parseBody = async (response: Response): Promise<unknown> => {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) return null;
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+};
+
+const request = async <T>(
+  path: string,
+  schema: RuntimeSchema<T>,
+  init: RequestInit = {},
+): Promise<T> => {
+  const hasBody = init.body !== undefined;
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: 'include',
+      headers: {
+        accept: 'application/json',
+        ...(hasBody ? { 'content-type': 'application/json' } : {}),
+        ...init.headers,
+      },
+    });
+  } catch {
+    throw new AdminApiError(0, 'NETWORK_ERROR');
+  }
+
+  const body = await parseBody(response);
+  if (!response.ok) {
+    const parsed = ApiErrorResponseSchema.safeParse(body);
+    throw new AdminApiError(
+      response.status,
+      parsed.success ? parsed.data.error.code : 'INVALID_RESPONSE',
+    );
+  }
+
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new AdminApiError(response.status, 'INVALID_RESPONSE');
+  return parsed.data;
+};
+
+const sendWithoutResponse = async (path: string, init: RequestInit): Promise<void> => {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      credentials: 'include',
+      headers: {
+        accept: 'application/json',
+        ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...init.headers,
+      },
+    });
+  } catch {
+    throw new AdminApiError(0, 'NETWORK_ERROR');
+  }
+  if (response.ok) return;
+  const parsed = ApiErrorResponseSchema.safeParse(await parseBody(response));
+  throw new AdminApiError(
+    response.status,
+    parsed.success ? parsed.data.error.code : 'INVALID_RESPONSE',
+  );
+};
+
+const jsonBody = (value: unknown): string => JSON.stringify(value);
+
+export const adminApi = {
+  authenticate: async (initData: string): Promise<AdminAuthResponse> => {
+    const body = AdminAuthRequestSchema.parse({ initData });
+    return request('/api/admin/auth/max', AdminAuthResponseSchema, {
+      body: jsonBody(body),
+      method: 'POST',
+    });
+  },
+
+  getSession: async (): Promise<AdminSessionResponse> =>
+    request('/api/admin/session', AdminSessionResponseSchema),
+
+  logout: async (): Promise<void> => sendWithoutResponse('/api/admin/logout', { method: 'POST' }),
+
+  listUsers: async (
+    cursor?: string,
+  ): Promise<{
+    readonly items: readonly AdminUserListItem[];
+    readonly nextCursor: string | null;
+  }> => {
+    const query = new URLSearchParams({ limit: '100' });
+    if (cursor !== undefined) query.set('cursor', cursor);
+    return request(`/api/admin/users?${query.toString()}`, AdminUserListResponseSchema);
+  },
+
+  listSubmissions: async (
+    filters: {
+      readonly cursor?: string;
+      readonly reviewStatus?: string;
+    } = {},
+  ): Promise<{
+    readonly items: readonly AdminSubmissionListItem[];
+    readonly nextCursor: string | null;
+  }> => {
+    const query = new URLSearchParams({ limit: '100' });
+    if (filters.cursor !== undefined) query.set('cursor', filters.cursor);
+    if (filters.reviewStatus !== undefined && filters.reviewStatus !== '') {
+      query.set('reviewStatus', filters.reviewStatus);
+    }
+    return request(`/api/admin/submissions?${query.toString()}`, AdminSubmissionListResponseSchema);
+  },
+
+  updateSubmission: async (
+    submissionId: string,
+    input: AdminSubmissionUpdateRequest,
+  ): Promise<AdminSubmissionListItem> => {
+    const body = AdminSubmissionUpdateRequestSchema.parse(input);
+    const response = await request(
+      `/api/admin/submissions/${encodeURIComponent(submissionId)}`,
+      AdminSubmissionResponseSchema,
+      { body: jsonBody(body), method: 'PATCH' },
+    );
+    return response.submission;
+  },
+
+  listCases: async (): Promise<readonly AdminCase[]> =>
+    (await request('/api/admin/cases', AdminCaseListResponseSchema)).items,
+
+  createCase: async (input: AdminCaseCreateRequest): Promise<AdminCase> => {
+    const body = AdminCaseCreateRequestSchema.parse(input);
+    return (
+      await request('/api/admin/cases', AdminCaseResponseSchema, {
+        body: jsonBody(body),
+        method: 'POST',
+      })
+    ).item;
+  },
+
+  updateCase: async (id: string, input: AdminCaseUpdateRequest): Promise<AdminCase> => {
+    const body = AdminCaseUpdateRequestSchema.parse(input);
+    return (
+      await request(`/api/admin/cases/${encodeURIComponent(id)}`, AdminCaseResponseSchema, {
+        body: jsonBody(body),
+        method: 'PATCH',
+      })
+    ).item;
+  },
+
+  deleteCase: async (id: string, expectedVersion: number): Promise<void> => {
+    const query = new URLSearchParams({ expectedVersion: String(expectedVersion) });
+    await sendWithoutResponse(`/api/admin/cases/${encodeURIComponent(id)}?${query.toString()}`, {
+      method: 'DELETE',
+    });
+  },
+
+  listContent: async (): Promise<readonly AdminContentDocument[]> =>
+    (await request('/api/admin/content', AdminContentListResponseSchema)).items,
+
+  createContent: async (input: AdminContentCreateRequest): Promise<AdminContentDocument> => {
+    const body = AdminContentCreateRequestSchema.parse(input);
+    return (
+      await request('/api/admin/content', AdminContentResponseSchema, {
+        body: jsonBody(body),
+        method: 'POST',
+      })
+    ).document;
+  },
+
+  updateContent: async (
+    key: string,
+    input: AdminContentUpdateRequest,
+  ): Promise<AdminContentDocument> => {
+    const body = AdminContentUpdateRequestSchema.parse(input);
+    return (
+      await request(`/api/admin/content/${encodeURIComponent(key)}`, AdminContentResponseSchema, {
+        body: jsonBody(body),
+        method: 'PUT',
+      })
+    ).document;
+  },
+
+  publishContent: async (key: string, expectedVersion: number): Promise<AdminContentDocument> => {
+    const body = AdminContentPublishRequestSchema.parse({ expectedVersion });
+    return (
+      await request(
+        `/api/admin/content/${encodeURIComponent(key)}/publish`,
+        AdminContentResponseSchema,
+        { body: jsonBody(body), method: 'POST' },
+      )
+    ).document;
+  },
+
+  deleteContent: async (key: string, expectedVersion: number): Promise<void> => {
+    const query = new URLSearchParams({ expectedVersion: String(expectedVersion) });
+    await sendWithoutResponse(`/api/admin/content/${encodeURIComponent(key)}?${query.toString()}`, {
+      method: 'DELETE',
+    });
+  },
+};

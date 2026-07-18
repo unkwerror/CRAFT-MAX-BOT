@@ -9,6 +9,7 @@ export const APP_ROUTES = [
   'summary',
   'success',
   'privacy',
+  'admin',
 ] as const;
 
 export type AppRoute = (typeof APP_ROUTES)[number];
@@ -24,6 +25,8 @@ export const routeHref = (route: AppRoute): string => `#${route}`;
 
 export const getRouteFromStartParam = (startParam: StartParam | null): AppRoute => {
   switch (startParam) {
+    case 'home':
+      return 'home';
     case 'new_project':
       return 'brief';
     case 'services':
@@ -32,6 +35,8 @@ export const getRouteFromStartParam = (startParam: StartParam | null): AppRoute 
       return 'cases';
     case 'upload_brief':
       return 'upload';
+    case 'admin':
+      return 'admin';
     default:
       return 'home';
   }

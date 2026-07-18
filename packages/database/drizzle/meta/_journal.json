@@ -36,6 +36,20 @@
       "when": 1784176213204,
       "tag": "0004_stage6_tracker_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784349505590,
+      "tag": "0005_admin_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784351616909,
+      "tag": "0006_seed_case_catalog",
+      "breakpoints": true
     }
   ]
 }

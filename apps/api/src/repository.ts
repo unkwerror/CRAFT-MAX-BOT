@@ -17,6 +17,8 @@ import {
   type SubmissionCreateRequest,
 } from '@craft72/contracts';
 import {
+  adminAuditLog,
+  adminSessions,
   documents,
   integrationOutbox,
   leadDrafts,
@@ -298,6 +300,14 @@ export class PostgresStage3Store implements Stage3Store {
           and not exists (
             select 1 from ${uploadSessions}
             where ${uploadSessions.maxUserId} = candidate.max_user_id
+          )
+          and not exists (
+            select 1 from ${adminSessions}
+            where ${adminSessions.maxUserId} = candidate.max_user_id
+          )
+          and not exists (
+            select 1 from ${adminAuditLog}
+            where ${adminAuditLog.actorMaxUserId} = candidate.max_user_id
           )
       `);
     });

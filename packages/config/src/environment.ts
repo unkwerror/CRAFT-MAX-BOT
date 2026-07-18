@@ -35,6 +35,37 @@ const booleanFromEnvironment = z
   .union([z.boolean(), z.enum(['true', 'false'])])
   .transform((value) => value === true || value === 'true');
 
+const adminMaxUserIds = z
+  .string()
+  .trim()
+  .max(1_024)
+  .transform((value) => (value.length === 0 ? [] : value.split(',').map((part) => part.trim())))
+  .pipe(
+    z
+      .array(
+        z
+          .string()
+          .regex(/^[1-9]\d{0,18}$/)
+          .refine(
+            (value) => BigInt(value) <= 9_223_372_036_854_775_807n,
+            'ADMIN_MAX_USER_IDS contains an identifier outside signed bigint range',
+          ),
+      )
+      .max(32)
+      .refine((values) => new Set(values).size === values.length, 'Admin IDs must be unique'),
+  );
+
+const maxManagerProfileUrl = z
+  .string()
+  .trim()
+  .max(2_048)
+  .refine(
+    (value) =>
+      value === '' ||
+      /^https:\/\/max\.ru\/(?:u\/[A-Za-z0-9_-]{1,256}|[A-Za-z0-9_]{1,128})$/.test(value),
+    'MAX_MANAGER_PROFILE_URL must be an exact manager profile link copied from MAX',
+  );
+
 export const serverEnvironmentSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -64,6 +95,16 @@ export const serverEnvironmentSchema = z
         /^[A-Za-z0-9_]+$/,
         'MAX_BOT_PUBLIC_NAME may contain only letters, digits and underscore',
       ),
+    MAX_MANAGER_PROFILE_URL: maxManagerProfileUrl.default(''),
+    MAX_MANAGER_USER_ID: z
+      .string()
+      .trim()
+      .regex(/^[1-9]\d{4,18}$/)
+      .refine((value) => BigInt(value) <= 9_223_372_036_854_775_807n),
+    MAX_MANAGER_PHONE: z
+      .string()
+      .trim()
+      .regex(/^\+[1-9]\d{7,14}$/),
     MAX_WEBHOOK_SECRET: concreteString('MAX_WEBHOOK_SECRET', 32)
       .max(256)
       .regex(
@@ -73,6 +114,8 @@ export const serverEnvironmentSchema = z
     MAX_API_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(10_000),
     MAX_INIT_DATA_MAX_AGE_SECONDS: z.coerce.number().int().positive().max(3_600),
     MAX_CONTACT_MAX_AGE_SECONDS: z.coerce.number().int().positive().max(3_600).default(300),
+    ADMIN_MAX_USER_IDS: adminMaxUserIds,
+    ADMIN_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(28_800),
     BOT_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(100).max(10_000).default(500),
     BOT_WORKER_LEASE_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
     BOT_WORKER_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(8),
@@ -272,6 +315,14 @@ export const serverEnvironmentSchema = z
 
     if (environment.NODE_ENV !== 'production') {
       return;
+    }
+
+    if (environment.ADMIN_MAX_USER_IDS.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'ADMIN_MAX_USER_IDS must contain at least one MAX user ID in production',
+        path: ['ADMIN_MAX_USER_IDS'],
+      });
     }
 
     for (const [key, value] of [
