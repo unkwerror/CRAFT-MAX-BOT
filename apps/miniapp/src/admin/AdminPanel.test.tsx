@@ -9,7 +9,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AdminPanel } from './AdminPanel.js';
-import { adminApi } from './admin-api.js';
+import { adminApi, AdminApiError } from './admin-api.js';
 
 const NOW = '2026-07-18T08:00:00.000Z';
 
@@ -111,6 +111,93 @@ const mockAuthenticatedAdminData = (content: readonly AdminContentDocument[] = [
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+describe('AdminPanel password authentication', () => {
+  it('restores an existing cookie session without asking for a password', async () => {
+    mockAuthenticatedAdminData();
+    const authenticate = vi.spyOn(adminApi, 'authenticate');
+
+    render(<AdminPanel initData="signed-admin-launch" onExit={vi.fn()} />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Добро пожаловать в КРАФТ Control' }),
+    ).toBeTruthy();
+    expect(authenticate).not.toHaveBeenCalled();
+    const profile = document.querySelector('.admin-profile');
+    expect(profile?.textContent).toContain('Администратор');
+    expect(profile?.textContent).toContain('Защищённая сессия');
+    expect(profile?.textContent).not.toContain('MAX');
+  });
+
+  it('shows a password form after a missing session and clears an invalid password', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(adminApi, 'getSession').mockRejectedValue(new AdminApiError(401, 'UNAUTHORIZED'));
+    const authenticate = vi
+      .spyOn(adminApi, 'authenticate')
+      .mockRejectedValue(new AdminApiError(401, 'UNAUTHORIZED'));
+    const listUsers = vi.spyOn(adminApi, 'listUsers');
+
+    render(<AdminPanel initData="signed-admin-launch" onExit={vi.fn()} />);
+
+    const password = await screen.findByLabelText('Пароль администратора');
+    expect(password.getAttribute('type')).toBe('password');
+    expect(password.getAttribute('autocomplete')).toBe('current-password');
+    expect(password.getAttribute('minlength')).toBe('12');
+    expect(password.getAttribute('maxlength')).toBe('256');
+    expect(listUsers).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Показать пароль' }));
+    expect(password.getAttribute('type')).toBe('text');
+    await user.type(password, 'incorrect-password');
+    await user.click(screen.getByRole('button', { name: 'Войти' }));
+
+    expect(authenticate).toHaveBeenCalledWith('signed-admin-launch', 'incorrect-password');
+    expect((await screen.findByRole('alert')).textContent).toContain('Неверный пароль');
+    expect((password as HTMLInputElement).value).toBe('');
+    expect(listUsers).not.toHaveBeenCalled();
+  });
+
+  it('opens the panel after password authentication and explains throttling', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(adminApi, 'getSession').mockRejectedValue(new AdminApiError(401, 'UNAUTHORIZED'));
+    const authenticate = vi
+      .spyOn(adminApi, 'authenticate')
+      .mockRejectedValueOnce(new AdminApiError(429, 'RATE_LIMITED'))
+      .mockResolvedValueOnce({
+        authenticated: true,
+        user: {
+          id: '347125190',
+          firstName: 'Системный',
+          lastName: null,
+          username: null,
+          languageCode: 'ru',
+          photoUrl: null,
+        },
+        expiresAt: '2026-07-18T16:00:00.000Z',
+      });
+    vi.spyOn(adminApi, 'listUsers').mockResolvedValue({ items: [], nextCursor: null });
+    vi.spyOn(adminApi, 'listSubmissions').mockResolvedValue({ items: [], nextCursor: null });
+    vi.spyOn(adminApi, 'listCases').mockResolvedValue([]);
+    vi.spyOn(adminApi, 'listContent').mockResolvedValue([]);
+
+    render(<AdminPanel initData="signed-admin-launch" onExit={vi.fn()} />);
+
+    const password = await screen.findByLabelText('Пароль администратора');
+    await user.type(password, 'correct-password');
+    await user.click(screen.getByRole('button', { name: 'Войти' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Слишком много попыток');
+    expect((password as HTMLInputElement).value).toBe('');
+
+    await user.type(password, 'correct-password');
+    await user.click(screen.getByRole('button', { name: 'Войти' }));
+
+    expect(
+      await screen.findByRole('heading', { name: 'Добро пожаловать в КРАФТ Control' }),
+    ).toBeTruthy();
+    expect(authenticate).toHaveBeenNthCalledWith(1, 'signed-admin-launch', 'correct-password');
+    expect(authenticate).toHaveBeenNthCalledWith(2, 'signed-admin-launch', 'correct-password');
+  });
 });
 
 describe('AdminPanel cursor pagination', () => {

@@ -58,19 +58,12 @@ export type BotPlannedAction =
 export interface BotPlanOptions {
   /** Public username of the bot whose Mini App should be opened. */
   readonly webApp: string;
-  /** Canonical MAX user IDs that may receive the administrative Mini App entry point. */
-  readonly adminMaxUserIds?: readonly string[];
   /** Full profile name displayed by MAX for the configured manager mention. */
   readonly managerDisplayName?: string;
   /** Canonical MAX user ID used in the supported max://user mention. */
   readonly managerUserId?: string;
   /** Validated, published administrator override for the greeting text. */
   readonly welcomeText?: string;
-}
-
-export interface OpenAppKeyboardOptions {
-  /** Adds the administrative entry point. The caller must authorize the current MAX actor first. */
-  readonly includeAdmin?: boolean;
 }
 
 export const BOT_WELCOME_CONTENT_KEY = 'bot-welcome' as const;
@@ -84,6 +77,10 @@ const ROUTING_TEXT =
 const CALLBACK_TEXT = 'Откройте нужный раздел мини-приложения КРАФТ:';
 const TEXT_REQUIRED_TEXT =
   'Сейчас бот сохраняет только текстовые обращения. Опишите задачу сообщением или откройте мини-приложение кнопками ниже.';
+const ADMIN_ENTRY_TEXT =
+  'Админ-панель скрыта из обычного меню и защищена отдельным паролем. Нажмите кнопку ниже, чтобы открыть форму входа.';
+const UNKNOWN_COMMAND_TEXT =
+  'Команда не распознана. Откройте мини-приложение или выберите нужное действие ниже.';
 const MANAGER_CONTACT_PHRASE = 'Связаться с менеджером';
 export const MANAGER_CONTACT_START_PAYLOAD = 'manager_contact' as const;
 const MANAGER_HANDOFF_TEXT =
@@ -126,18 +123,12 @@ function openAppButton(text: string, webApp: string, payload: BotStartPayload): 
   return { payload, text, type: 'open_app', web_app: webApp };
 }
 
-export function createOpenAppKeyboard(
-  webAppInput: string,
-  options: OpenAppKeyboardOptions = {},
-): MaxInlineKeyboardAttachment {
+export function createOpenAppKeyboard(webAppInput: string): MaxInlineKeyboardAttachment {
   const webApp = safeWebApp(webAppInput);
   return {
     type: 'inline_keyboard',
     payload: {
       buttons: [
-        ...(options.includeAdmin === true
-          ? [[openAppButton('Админ-панель', webApp, 'admin')]]
-          : []),
         [openAppButton('Открыть КРАФТ', webApp, 'home')],
         [openAppButton('Заполнить анкету', webApp, 'new_project')],
         [
@@ -151,8 +142,22 @@ export function createOpenAppKeyboard(
   };
 }
 
-function messageBody(text: string, webApp: string, includeAdmin: boolean): MaxSendMessageBody {
-  return { attachments: [createOpenAppKeyboard(webApp, { includeAdmin })], text };
+function messageBody(text: string, webApp: string): MaxSendMessageBody {
+  return { attachments: [createOpenAppKeyboard(webApp)], text };
+}
+
+function adminEntryBody(webApp: string): MaxSendMessageBody {
+  return {
+    attachments: [
+      {
+        type: 'inline_keyboard',
+        payload: {
+          buttons: [[openAppButton('Открыть админ-панель', webApp, 'admin')]],
+        },
+      },
+    ],
+    text: ADMIN_ENTRY_TEXT,
+  };
 }
 
 function approvedManagerUserId(value: string | undefined): string | null {
@@ -181,8 +186,13 @@ function managerContactBody(options: BotPlanOptions): MaxSendMessageBody | null 
   };
 }
 
-function isAdminActor(update: ParsedMaxUpdate, adminMaxUserIds: readonly string[]): boolean {
-  return update.actorUserId !== null && adminMaxUserIds.includes(update.actorUserId);
+function isAdminCommand(text: string, webApp: string): boolean {
+  const normalized = text.toLocaleLowerCase('en-US');
+  return normalized === '/admin' || normalized === `/admin@${webApp.toLocaleLowerCase('en-US')}`;
+}
+
+function looksLikeCommand(text: string): boolean {
+  return /^\/[A-Za-z0-9_]+(?:@[A-Za-z0-9_]+)?(?:\s|$)/.test(text);
 }
 
 function eventActionKey(update: ParsedMaxUpdate, action: string): string {
@@ -248,7 +258,6 @@ export function planBotActions(
   options: BotPlanOptions,
 ): readonly BotPlannedAction[] {
   const webApp = safeWebApp(options.webApp);
-  const includeAdmin = isAdminActor(update, options.adminMaxUserIds ?? []);
   const welcomeText = publishedBotWelcomeText({ text: options.welcomeText }) ?? WELCOME_TEXT;
   const managerContact = managerContactBody(options);
 
@@ -261,12 +270,7 @@ export function planBotActions(
     }
     return compact([
       dialogAction(update, true),
-      sendAction(
-        update,
-        messageBody(welcomeText, webApp, includeAdmin),
-        'welcome',
-        welcomeActionKey(update),
-      ),
+      sendAction(update, messageBody(welcomeText, webApp), 'welcome', welcomeActionKey(update)),
     ]);
   }
 
@@ -276,7 +280,7 @@ export function planBotActions(
     return compact([
       dialogAction(update, true),
       answerCallbackAction(update, {
-        message: messageBody(CALLBACK_TEXT, webApp, includeAdmin),
+        message: messageBody(CALLBACK_TEXT, webApp),
       }),
     ]);
   }
@@ -293,12 +297,7 @@ export function planBotActions(
   if (START_COMMAND_PATTERN.test(text)) {
     return compact([
       dialogAction(update, true),
-      sendAction(
-        update,
-        messageBody(welcomeText, webApp, includeAdmin),
-        'welcome',
-        welcomeActionKey(update),
-      ),
+      sendAction(update, messageBody(welcomeText, webApp), 'welcome', welcomeActionKey(update)),
     ]);
   }
 
@@ -311,10 +310,24 @@ export function planBotActions(
     ]);
   }
 
+  if (isAdminCommand(text, webApp)) {
+    return compact([
+      dialogAction(update, true),
+      sendAction(update, adminEntryBody(webApp), 'admin_entry'),
+    ]);
+  }
+
+  if (looksLikeCommand(text)) {
+    return compact([
+      dialogAction(update, true),
+      sendAction(update, messageBody(UNKNOWN_COMMAND_TEXT, webApp), 'unknown_command'),
+    ]);
+  }
+
   if (text.length === 0) {
     return compact([
       dialogAction(update, true),
-      sendAction(update, messageBody(TEXT_REQUIRED_TEXT, webApp, includeAdmin), 'text_required'),
+      sendAction(update, messageBody(TEXT_REQUIRED_TEXT, webApp), 'text_required'),
     ]);
   }
 
@@ -343,7 +356,7 @@ export function planBotActions(
       update,
       isManagerContact && managerContact !== null
         ? managerContact
-        : messageBody(isManagerContact ? MANAGER_HANDOFF_TEXT : ROUTING_TEXT, webApp, includeAdmin),
+        : messageBody(isManagerContact ? MANAGER_HANDOFF_TEXT : ROUTING_TEXT, webApp),
       isManagerContact ? 'manager_handoff' : 'route_message',
     ),
   ]);

@@ -35,26 +35,6 @@ const booleanFromEnvironment = z
   .union([z.boolean(), z.enum(['true', 'false'])])
   .transform((value) => value === true || value === 'true');
 
-const adminMaxUserIds = z
-  .string()
-  .trim()
-  .max(1_024)
-  .transform((value) => (value.length === 0 ? [] : value.split(',').map((part) => part.trim())))
-  .pipe(
-    z
-      .array(
-        z
-          .string()
-          .regex(/^[1-9]\d{0,18}$/)
-          .refine(
-            (value) => BigInt(value) <= 9_223_372_036_854_775_807n,
-            'ADMIN_MAX_USER_IDS contains an identifier outside signed bigint range',
-          ),
-      )
-      .max(32)
-      .refine((values) => new Set(values).size === values.length, 'Admin IDs must be unique'),
-  );
-
 const maxManagerProfileUrl = z
   .string()
   .trim()
@@ -120,7 +100,10 @@ export const serverEnvironmentSchema = z
     MAX_API_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(10_000),
     MAX_INIT_DATA_MAX_AGE_SECONDS: z.coerce.number().int().positive().max(3_600),
     MAX_CONTACT_MAX_AGE_SECONDS: z.coerce.number().int().positive().max(3_600).default(300),
-    ADMIN_MAX_USER_IDS: adminMaxUserIds,
+    ADMIN_PASSWORD_SCRYPT_HASH: concreteString('ADMIN_PASSWORD_SCRYPT_HASH').regex(
+      /^scrypt-v1\$[A-Za-z0-9_-]{22}\$[A-Za-z0-9_-]{43}$/,
+      'ADMIN_PASSWORD_SCRYPT_HASH must use the supported scrypt-v1 format',
+    ),
     ADMIN_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(28_800),
     BOT_WORKER_POLL_INTERVAL_MS: z.coerce.number().int().min(100).max(10_000).default(500),
     BOT_WORKER_LEASE_SECONDS: z.coerce.number().int().min(10).max(600).default(60),
@@ -321,14 +304,6 @@ export const serverEnvironmentSchema = z
 
     if (environment.NODE_ENV !== 'production') {
       return;
-    }
-
-    if (environment.ADMIN_MAX_USER_IDS.length === 0) {
-      context.addIssue({
-        code: 'custom',
-        message: 'ADMIN_MAX_USER_IDS must contain at least one MAX user ID in production',
-        path: ['ADMIN_MAX_USER_IDS'],
-      });
     }
 
     for (const [key, value] of [

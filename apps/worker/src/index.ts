@@ -79,7 +79,6 @@ async function main(): Promise<void> {
     await Promise.all([
       runBotWorker(
         {
-          adminMaxUserIds: environment.ADMIN_MAX_USER_IDS,
           baseDelayMs: environment.BOT_RETRY_BASE_MS,
           leaseSeconds: environment.BOT_WORKER_LEASE_SECONDS,
           log,

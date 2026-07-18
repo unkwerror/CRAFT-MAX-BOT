@@ -46,6 +46,8 @@ const NOW = new Date('2026-07-18T08:00:00.000Z');
 const EXPIRES = new Date('2026-07-18T16:00:00.000Z');
 const TOKEN = 'A'.repeat(43);
 const ORIGIN = 'https://craft72app.ru';
+const PASSWORD = 'correct horse battery staple';
+const verifyAdminPassword = vi.fn(async (password: string) => password === PASSWORD);
 
 const adminUser = {
   id: ADMIN_ID,
@@ -312,10 +314,11 @@ class MemoryAdminStore implements AdminStore {
   }
 }
 
-function signInitData(userId: string): string {
+function signInitData(userId: string, startParam = 'admin'): string {
   const values = [
     ['auth_date', String(Math.floor(NOW.getTime() / 1_000) - 30)],
     ['query_id', `admin-${userId}`],
+    ['start_param', startParam],
     [
       'user',
       JSON.stringify({
@@ -341,13 +344,14 @@ describe('admin API foundation', () => {
   let app: Awaited<ReturnType<typeof buildStage3Api>>;
 
   beforeEach(async () => {
+    vi.clearAllMocks();
     store = new MemoryAdminStore();
     app = await buildStage3Api({
       admin: buildAdminApiModule({
-        allowedMaxUserIds: [ADMIN_ID],
         botToken: BOT_TOKEN,
         initDataMaxAgeSeconds: 3_600,
         now: () => NOW,
+        passwordVerifier: { verify: verifyAdminPassword },
         publicBaseUrl: ORIGIN,
         store,
       }),
@@ -369,7 +373,67 @@ describe('admin API foundation', () => {
     await app.close();
   });
 
-  it('creates only an HttpOnly Strict allowlisted session cookie', async () => {
+  it('creates only an HttpOnly Strict session after password and command launch proof', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/password',
+      headers: { origin: ORIGIN },
+      payload: { initData: signInitData(ADMIN_ID), password: PASSWORD },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(AdminAuthResponseSchema.parse(response.json()).user.id).toBe(ADMIN_ID);
+    expect(response.body).not.toContain(TOKEN);
+    expect(response.body).not.toContain(PASSWORD);
+    expect(response.headers['set-cookie']).toContain(`${ADMIN_SESSION_COOKIE}=${TOKEN}`);
+    expect(response.headers['set-cookie']).toContain('Secure');
+    expect(response.headers['set-cookie']).toContain('HttpOnly');
+    expect(response.headers['set-cookie']).toContain('SameSite=Strict');
+
+    const anotherProfile = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/password',
+      headers: { origin: ORIGIN },
+      payload: { initData: signInitData('61096227'), password: PASSWORD },
+    });
+    expect(anotherProfile.statusCode).toBe(200);
+    expect(AdminAuthResponseSchema.parse(anotherProfile.json()).user.id).toBe('61096227');
+  });
+
+  it('returns one credential error for wrong password, launch payload and MAX proof', async () => {
+    const requests = [
+      { initData: signInitData(ADMIN_ID), password: 'this password is wrong' },
+      { initData: signInitData(ADMIN_ID, 'home'), password: PASSWORD },
+      { initData: `${signInitData(ADMIN_ID)}forged`, password: PASSWORD },
+    ];
+
+    for (const payload of requests) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/admin/auth/password',
+        headers: { origin: ORIGIN },
+        payload,
+      });
+      expect(response.statusCode).toBe(401);
+      expect(ApiErrorResponseSchema.parse(response.json()).error.code).toBe('UNAUTHORIZED');
+    }
+    expect(store.createSessionSpy).not.toHaveBeenCalled();
+    expect(verifyAdminPassword).toHaveBeenCalledTimes(3);
+  });
+
+  it('rejects password login outside the configured origin', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/auth/password',
+      payload: { initData: signInitData(ADMIN_ID), password: PASSWORD },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(verifyAdminPassword).not.toHaveBeenCalled();
+    expect(store.createSessionSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not retain the former profile-based authentication endpoint', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/admin/auth/max',
@@ -377,22 +441,22 @@ describe('admin API foundation', () => {
       payload: { initData: signInitData(ADMIN_ID) },
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(AdminAuthResponseSchema.parse(response.json()).user.id).toBe(ADMIN_ID);
-    expect(response.body).not.toContain(TOKEN);
-    expect(response.headers['set-cookie']).toContain(`${ADMIN_SESSION_COOKIE}=${TOKEN}`);
-    expect(response.headers['set-cookie']).toContain('Secure');
-    expect(response.headers['set-cookie']).toContain('HttpOnly');
-    expect(response.headers['set-cookie']).toContain('SameSite=Strict');
+    expect(response.statusCode).toBe(404);
+  });
 
-    const denied = await app.inject({
-      method: 'POST',
-      url: '/api/admin/auth/max',
-      headers: { origin: ORIGIN },
-      payload: { initData: signInitData('61096227') },
-    });
-    expect(denied.statusCode).toBe(403);
-    expect(ApiErrorResponseSchema.parse(denied.json()).error.code).toBe('FORBIDDEN');
+  it('rate limits repeated password attempts independently of the broad API quota', async () => {
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/admin/auth/password',
+        headers: { origin: ORIGIN },
+        payload: { initData: signInitData(ADMIN_ID), password: 'this password is wrong' },
+      });
+      statuses.push(response.statusCode);
+    }
+
+    expect(statuses).toEqual([401, 401, 401, 401, 401, 429]);
   });
 
   it('requires same-origin writes and keeps submitted intake immutable', async () => {

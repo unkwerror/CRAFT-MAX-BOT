@@ -21,7 +21,10 @@ describeWithDatabase('PostgresAdminStore user directory integration', () => {
   }
 
   const client = createDatabaseClient({ connectionString, max: 2 });
-  const store = new PostgresAdminStore(client.db, { sessionTtlSeconds: 3_600 });
+  const store = new PostgresAdminStore(client.db, {
+    sessionTokenHashKey: Buffer.alloc(32, 7),
+    sessionTtlSeconds: 3_600,
+  });
   let releaseIsolationLock: (() => Promise<void>) | null = null;
   const profileUserId = 900000000000000101n;
   const botOnlyUserId = 900000000000000102n;

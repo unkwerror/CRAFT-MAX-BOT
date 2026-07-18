@@ -105,12 +105,12 @@ set +a
 : "${MAX_MANAGER_USER_ID:?}"
 : "${MAX_MANAGER_DISPLAY_NAME:?}"
 : "${MAX_MANAGER_PHONE:?}"
-: "${ADMIN_MAX_USER_IDS:?}"
+: "${ADMIN_PASSWORD_SCRYPT_HASH:?}"
 [[ "${PRIVACY_POLICY_URL}" != *$'\n'* && "${CONSENT_VERSION}" != *$'\n'* && \
   "${MAX_BOT_PUBLIC_NAME}" != *$'\n'* && "${MAX_MANAGER_PROFILE_URL}" != *$'\n'* && \
   "${MAX_MANAGER_USER_ID}" != *$'\n'* && \
   "${MAX_MANAGER_DISPLAY_NAME}" != *$'\n'* && \
-  "${MAX_MANAGER_PHONE}" != *$'\n'* && "${ADMIN_MAX_USER_IDS}" != *$'\n'* ]] || exit 2
+  "${MAX_MANAGER_PHONE}" != *$'\n'* && "${ADMIN_PASSWORD_SCRYPT_HASH}" != *$'\n'* ]] || exit 2
 
 valid_signed_max_id() {
   local value="$1"
@@ -122,23 +122,13 @@ valid_signed_max_id "${MAX_MANAGER_USER_ID}" && ((${#MAX_MANAGER_USER_ID} >= 5))
 ((${#MAX_MANAGER_DISPLAY_NAME} >= 1 && ${#MAX_MANAGER_DISPLAY_NAME} <= 128)) || exit 2
 [[ "${MAX_MANAGER_DISPLAY_NAME}" != *'['* && "${MAX_MANAGER_DISPLAY_NAME}" != *']'* && \
   "${MAX_MANAGER_DISPLAY_NAME}" != *'\\'* ]] || exit 2
-declare -A seen_admin_ids=()
-IFS=',' read -ra admin_ids <<<"${ADMIN_MAX_USER_IDS}"
-((${#admin_ids[@]} >= 1 && ${#admin_ids[@]} <= 32)) || exit 2
-for raw_admin_id in "${admin_ids[@]}"; do
-  admin_id="${raw_admin_id#"${raw_admin_id%%[![:space:]]*}"}"
-  admin_id="${admin_id%"${admin_id##*[![:space:]]}"}"
-  valid_signed_max_id "${admin_id}" || exit 2
-  [[ -z "${seen_admin_ids[${admin_id}]:-}" ]] || exit 2
-  seen_admin_ids["${admin_id}"]=1
-done
-unset admin_id admin_ids raw_admin_id seen_admin_ids
+[[ "${ADMIN_PASSWORD_SCRYPT_HASH}" =~ ^scrypt-v1\$[A-Za-z0-9_-]{22}\$[A-Za-z0-9_-]{43}$ ]] || exit 2
 printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
   "${PRIVACY_POLICY_URL}" "${CONSENT_VERSION}" "${MAX_BOT_PUBLIC_NAME}" \
   "${MAX_MANAGER_PROFILE_URL}" "${MAX_MANAGER_USER_ID}" "${MAX_MANAGER_PHONE}"
 REMOTE_CONFIG
 )"; then
-  die "Could not validate the public settings and admin allowlist in the server environment."
+  die "Could not validate the public settings and protected admin authentication configuration."
 fi
 mapfile -t public_values <<<"${public_configuration}"
 [[ "${#public_values[@]}" -eq 6 ]] || die "Server public build settings are missing or malformed."

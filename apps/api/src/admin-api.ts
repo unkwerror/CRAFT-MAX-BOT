@@ -37,16 +37,17 @@ import {
   type AdminStore,
   type AuthenticatedAdmin,
 } from './admin-repository.js';
+import type { AdminPasswordVerifier } from './admin-password.js';
 import { MaxProofError, validateMaxInitData } from './max-auth.js';
 import { ApiHttpError, type Stage3ApiModule } from './server.js';
 
 export const ADMIN_SESSION_COOKIE = '__Host-craft72-admin' as const;
 
 export interface AdminApiOptions {
-  readonly allowedMaxUserIds: readonly string[];
   readonly botToken: string;
   readonly initDataMaxAgeSeconds: number;
   readonly now?: () => Date;
+  readonly passwordVerifier: Pick<AdminPasswordVerifier, 'verify'>;
   readonly publicBaseUrl: string;
   readonly store: AdminStore;
 }
@@ -148,7 +149,6 @@ function decodeCaseCursor(value: string): string {
 export function buildAdminApiModule(options: AdminApiOptions): Stage3ApiModule {
   const clock = options.now ?? (() => new Date());
   const allowedOrigin = new URL(options.publicBaseUrl).origin;
-  const allowlist = new Set(options.allowedMaxUserIds);
 
   const requireSameOrigin = (request: FastifyRequest): void => {
     if (request.headers.origin !== allowedOrigin) {
@@ -164,7 +164,7 @@ export function buildAdminApiModule(options: AdminApiOptions): Stage3ApiModule {
       throw new ApiHttpError(401, 'UNAUTHORIZED', 'A valid admin session is required');
     }
     const admin = await options.store.authenticate(token);
-    if (admin === null || !allowlist.has(admin.maxUserId)) {
+    if (admin === null) {
       throw new ApiHttpError(401, 'UNAUTHORIZED', 'The admin session is invalid or expired');
     }
     return { admin, token };
@@ -172,35 +172,43 @@ export function buildAdminApiModule(options: AdminApiOptions): Stage3ApiModule {
 
   return {
     async register(app: FastifyInstance): Promise<void> {
-      app.post('/api/admin/auth/max', async (request, reply) => {
-        requireSameOrigin(request);
-        const body = parseWithSchema(AdminAuthRequestSchema, request.body);
-        let validated;
-        try {
-          validated = validateMaxInitData(body.initData, {
-            botToken: options.botToken,
-            maxAgeSeconds: options.initDataMaxAgeSeconds,
-            now: clock,
-          });
-        } catch (error) {
-          if (error instanceof MaxProofError) {
-            throw error.code === 'expired'
-              ? new ApiHttpError(401, 'MAX_AUTH_EXPIRED', 'MAX authentication data has expired')
-              : new ApiHttpError(401, 'MAX_AUTH_INVALID', 'MAX authentication data is invalid');
+      app.post(
+        '/api/admin/auth/password',
+        {
+          config: {
+            rateLimit: {
+              groupId: 'admin-password-auth',
+              max: 5,
+              timeWindow: 15 * 60 * 1_000,
+            },
+          },
+        },
+        async (request, reply) => {
+          requireSameOrigin(request);
+          const body = parseWithSchema(AdminAuthRequestSchema, request.body);
+          let validated = null;
+          try {
+            validated = validateMaxInitData(body.initData, {
+              botToken: options.botToken,
+              maxAgeSeconds: options.initDataMaxAgeSeconds,
+              now: clock,
+            });
+          } catch (error) {
+            if (!(error instanceof MaxProofError)) throw error;
           }
-          throw error;
-        }
-        if (!allowlist.has(validated.user.id)) {
-          throw new ApiHttpError(403, 'FORBIDDEN', 'This MAX account is not an administrator');
-        }
-        const session = await options.store.createSession(validated.user, request.id);
-        setSessionCookie(reply, session.token, session.expiresAt, validNow(clock));
-        return AdminAuthResponseSchema.parse({
-          authenticated: true,
-          user: session.user,
-          expiresAt: session.expiresAt.toISOString(),
-        });
-      });
+          const passwordValid = await options.passwordVerifier.verify(body.password);
+          if (validated?.startParam !== 'admin' || !passwordValid) {
+            throw new ApiHttpError(401, 'UNAUTHORIZED', 'Admin credentials are invalid');
+          }
+          const session = await options.store.createSession(validated.user, request.id);
+          setSessionCookie(reply, session.token, session.expiresAt, validNow(clock));
+          return AdminAuthResponseSchema.parse({
+            authenticated: true,
+            user: session.user,
+            expiresAt: session.expiresAt.toISOString(),
+          });
+        },
+      );
 
       app.get('/api/admin/session', async (request) => {
         const { admin } = await authenticate(request);

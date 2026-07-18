@@ -2,6 +2,7 @@ import { parseServerEnvironment } from '@craft72/config';
 import { createDatabaseClient } from '@craft72/database';
 
 import { buildAdminApiModule } from './admin-api.js';
+import { AdminPasswordVerifier } from './admin-password.js';
 import { PostgresAdminStore } from './admin-repository.js';
 import { ClamAvScanner } from './clamav.js';
 import { PrivateFileStorage } from './file-storage.js';
@@ -24,7 +25,9 @@ const store = new PostgresStage3Store(databaseClient.db, {
   draftTtlSeconds: environment.DRAFT_TTL_SECONDS,
   submissionRetentionDays: environment.SUBMISSION_RETENTION_DAYS,
 });
+const adminPasswordVerifier = new AdminPasswordVerifier(environment.ADMIN_PASSWORD_SCRYPT_HASH);
 const adminStore = new PostgresAdminStore(databaseClient.db, {
+  sessionTokenHashKey: adminPasswordVerifier.sessionTokenHashKey,
   sessionTtlSeconds: environment.ADMIN_SESSION_TTL_SECONDS,
 });
 const fileStorage = new PrivateFileStorage({
@@ -55,9 +58,9 @@ const uploads = new SecureUploadService(databaseClient.db, {
 });
 const app = await buildStage3Api({
   admin: buildAdminApiModule({
-    allowedMaxUserIds: environment.ADMIN_MAX_USER_IDS,
     botToken: environment.MAX_BOT_TOKEN,
     initDataMaxAgeSeconds: environment.MAX_INIT_DATA_MAX_AGE_SECONDS,
+    passwordVerifier: adminPasswordVerifier,
     publicBaseUrl: environment.PUBLIC_BASE_URL,
     store: adminStore,
   }),

@@ -33,6 +33,11 @@ export const AdminAuthRequestSchema = z.strictObject({
     .min(1)
     .max(16_384)
     .refine((value) => !value.includes('\0')),
+  password: z
+    .string()
+    .min(12)
+    .max(256)
+    .refine((value) => !value.includes('\0')),
 });
 export type AdminAuthRequest = z.infer<typeof AdminAuthRequestSchema>;
 

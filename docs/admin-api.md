@@ -1,9 +1,16 @@
 # Admin backend foundation
 
-The admin API uses the same signed MAX `initData` proof as the Mini App, then checks the server-side
-`ADMIN_MAX_USER_IDS` allowlist. A successful `POST /api/admin/auth/max` stores only a SHA-256 hash of
-the random session credential and returns it in the `__Host-craft72-admin` cookie. The credential is
-never included in JSON or browser storage. Mutating requests require the exact production `Origin`;
+The admin API accepts `POST /api/admin/auth/password` only with fresh signed MAX `initData` whose
+`start_param` is exactly `admin`. This proves that the login form was opened from the bot command,
+but the MAX profile is not an authorization allowlist: access is granted by the password whose
+scrypt verifier is stored in `ADMIN_PASSWORD_SCRYPT_HASH`. The signed profile is retained only as
+the audit identity for the resulting session.
+
+The login route is limited to five attempts per source IP in 15 minutes. A successful login stores
+only an HMAC-SHA-256 digest of a random 32-byte session credential and returns the credential in the
+`__Host-craft72-admin` cookie. The HMAC key is derived from the configured password verifier, so a
+password rotation also invalidates every existing session. Neither password nor session credential
+is included in JSON or browser storage. Mutating requests require the exact production `Origin`;
 the cookie is `Secure`, `HttpOnly`, `SameSite=Strict`, host-only and bounded by
 `ADMIN_SESSION_TTL_SECONDS`.
 

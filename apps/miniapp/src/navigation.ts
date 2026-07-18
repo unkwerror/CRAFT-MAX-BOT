@@ -14,11 +14,11 @@ export const APP_ROUTES = [
 
 export type AppRoute = (typeof APP_ROUTES)[number];
 
-const routeSet = new Set<string>(APP_ROUTES);
+const hashRouteSet = new Set<string>(APP_ROUTES.filter((route) => route !== 'admin'));
 
 export const getRouteFromHash = (hash: string): AppRoute => {
   const route = hash.replace(/^#\/?/, '').split('?')[0];
-  return route !== undefined && routeSet.has(route) ? (route as AppRoute) : 'home';
+  return route !== undefined && hashRouteSet.has(route) ? (route as AppRoute) : 'home';
 };
 
 export const routeHref = (route: AppRoute): string => `#${route}`;

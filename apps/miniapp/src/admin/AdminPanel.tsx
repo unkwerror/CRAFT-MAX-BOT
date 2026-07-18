@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import type {
   AdminCase,
   AdminCaseCreateRequest,
@@ -20,7 +20,7 @@ import {
 } from './questionnaire-content.js';
 
 type AdminTab = 'overview' | 'submissions' | 'users' | 'cases' | 'content';
-type AuthState = 'checking' | 'ready' | 'outside-max' | 'forbidden' | 'error';
+type AuthState = 'checking' | 'error' | 'login' | 'ready' | 'submitting';
 
 const ADMIN_TABS: readonly { icon: IconName; label: string; value: AdminTab }[] = [
   { icon: 'spark', label: 'Обзор', value: 'overview' },
@@ -53,19 +53,24 @@ const formatDate = (value: string, withTime = true): string => {
   }).format(date);
 };
 
-const displayName = (user: {
-  readonly firstName: string;
-  readonly lastName: string | null;
-}): string => [user.firstName, user.lastName].filter(Boolean).join(' ');
-
 const errorMessage = (error: unknown): string => {
   if (!(error instanceof AdminApiError)) return 'Не удалось выполнить действие. Повторите позже.';
   if (error.status === 409) return 'Данные уже изменились. Обновите список и повторите.';
-  if (error.status === 401) return 'Админ-сессия завершилась. Откройте панель заново из MAX.';
-  if (error.status === 403) return 'У этого MAX-аккаунта нет доступа к админ-панели.';
+  if (error.status === 401) return 'Админ-сессия завершилась. Войдите в панель снова.';
+  if (error.status === 403) return 'Действие недоступно для текущей админ-сессии.';
   if (error.code === 'VALIDATION_ERROR') return 'Проверьте заполненные поля и формат значений.';
   if (error.status === 0) return 'Нет соединения с сервером. Проверьте интернет.';
   return 'Сервер не смог выполнить действие. Попробуйте ещё раз.';
+};
+
+const loginErrorMessage = (error: unknown): string => {
+  if (!(error instanceof AdminApiError)) return 'Не удалось войти. Повторите попытку.';
+  if (error.status === 429) return 'Слишком много попыток. Подождите немного и попробуйте снова.';
+  if (error.status === 401) {
+    return 'Неверный пароль. Если ошибка повторяется, заново вызовите команду /admin у бота.';
+  }
+  if (error.status === 0) return 'Нет соединения с сервером. Проверьте интернет.';
+  return 'Сервис входа временно недоступен. Попробуйте позже.';
 };
 
 interface CursorPage<T> {
@@ -212,6 +217,9 @@ const caseFormPayload = (form: CaseFormState): AdminCaseCreateRequest => ({
 
 export const AdminPanel = ({ initData, onExit }: AdminPanelProps) => {
   const [authState, setAuthState] = useState<AuthState>('checking');
+  const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [session, setSession] = useState<AdminSessionResponse | null>(null);
   const [tab, setTab] = useState<AdminTab>('overview');
   const [users, setUsers] = useState<readonly AdminUserListItem[]>([]);
@@ -249,31 +257,53 @@ export const AdminPanel = ({ initData, onExit }: AdminPanelProps) => {
     let active = true;
     void (async () => {
       try {
-        let authenticated: AdminSessionResponse;
-        try {
-          authenticated = await adminApi.getSession();
-        } catch (error) {
-          if (!(error instanceof AdminApiError) || error.status !== 401) throw error;
-          if (initData === null || initData === '') {
-            if (active) setAuthState('outside-max');
-            return;
-          }
-          authenticated = await adminApi.authenticate(initData);
-        }
+        const authenticated = await adminApi.getSession();
         if (!active) return;
         setSession(authenticated);
         setAuthState('ready');
       } catch (error) {
         if (!active) return;
-        setAuthState(
-          error instanceof AdminApiError && error.status === 403 ? 'forbidden' : 'error',
+        if (error instanceof AdminApiError && error.status === 401 && initData !== null) {
+          setAuthState('login');
+          return;
+        }
+        setLoginError(
+          initData === null
+            ? 'Откройте админ-панель командой /admin в чате с ботом.'
+            : 'Не удалось проверить админ-сессию. Проверьте соединение и попробуйте снова.',
         );
+        setAuthState('error');
       }
     })();
     return () => {
       active = false;
     };
   }, [initData]);
+
+  const authenticateWithPassword = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    if (authState === 'submitting' || password.length < 12) return;
+    if (initData === null || initData === '') {
+      setLoginError('Откройте админ-панель командой /admin в чате с ботом.');
+      setAuthState('error');
+      setPassword('');
+      return;
+    }
+
+    const submittedPassword = password;
+    setAuthState('submitting');
+    setLoginError(null);
+    try {
+      const authenticated = await adminApi.authenticate(initData, submittedPassword);
+      setSession(authenticated);
+      setAuthState('ready');
+    } catch (error) {
+      setLoginError(loginErrorMessage(error));
+      setAuthState('login');
+    } finally {
+      setPassword('');
+    }
+  };
 
   useEffect(() => {
     if (authState !== 'ready') return;
@@ -287,26 +317,19 @@ export const AdminPanel = ({ initData, onExit }: AdminPanelProps) => {
   }, [notice]);
 
   if (authState !== 'ready' || session === null) {
-    const stateCopy =
+    const isLogin = authState === 'login' || authState === 'submitting';
+    const title =
       authState === 'checking'
-        ? {
-            title: 'Проверяем доступ',
-            text: 'Подтверждаем MAX-аккаунт и защищённую админ-сессию.',
-          }
-        : authState === 'outside-max'
-          ? {
-              title: 'Откройте панель из MAX',
-              text: 'Админ-панель использует подпись MAX вместо пароля. Нажмите «Админ-панель» в чате с ботом.',
-            }
-          : authState === 'forbidden'
-            ? {
-                title: 'Доступ не разрешён',
-                text: 'Этот MAX-аккаунт не входит в список администраторов.',
-              }
-            : {
-                title: 'Не удалось войти',
-                text: 'Проверьте соединение и повторно откройте Mini App из чата с ботом.',
-              };
+        ? 'Проверяем сессию'
+        : isLogin
+          ? 'Вход в КРАФТ Control'
+          : 'Не удалось открыть панель';
+    const text =
+      authState === 'checking'
+        ? 'Проверяем сохранённую защищённую сессию.'
+        : isLogin
+          ? 'Введите пароль администратора. Он не сохраняется в приложении и передаётся только по защищённому соединению.'
+          : (loginError ?? 'Проверьте соединение и заново вызовите команду /admin у бота.');
     return (
       <main className="admin-auth-state">
         <div className="admin-auth-state__brand">
@@ -314,16 +337,77 @@ export const AdminPanel = ({ initData, onExit }: AdminPanelProps) => {
         </div>
         <div className="admin-auth-state__visual">
           <span className={authState === 'checking' ? 'admin-loader' : ''}>
-            <Icon name={authState === 'forbidden' ? 'warning' : 'shield'} size={30} />
+            <Icon name={authState === 'error' ? 'warning' : 'shield'} size={30} />
           </span>
         </div>
         <p className="eyebrow">Защищённая зона</p>
-        <h1>{stateCopy.title}</h1>
-        <p>{stateCopy.text}</p>
-        {authState === 'checking' ? null : (
-          <button className="admin-button admin-button--primary" onClick={onExit} type="button">
-            Вернуться в Mini App
-          </button>
+        <h1>{title}</h1>
+        <p>{text}</p>
+        {isLogin ? (
+          <form
+            className="admin-login-form"
+            onSubmit={(event) => void authenticateWithPassword(event)}
+          >
+            <label htmlFor="admin-password">Пароль администратора</label>
+            <div className="admin-password-field">
+              <input
+                aria-describedby={loginError === null ? undefined : 'admin-login-error'}
+                aria-invalid={loginError === null ? undefined : true}
+                autoComplete="current-password"
+                disabled={authState === 'submitting'}
+                id="admin-password"
+                maxLength={256}
+                minLength={12}
+                onChange={(event) => {
+                  setPassword(event.currentTarget.value);
+                  if (loginError !== null) setLoginError(null);
+                }}
+                placeholder="Введите пароль"
+                type={passwordVisible ? 'text' : 'password'}
+                value={password}
+              />
+              <button
+                aria-label={passwordVisible ? 'Скрыть пароль' : 'Показать пароль'}
+                disabled={authState === 'submitting'}
+                onClick={() => setPasswordVisible((visible) => !visible)}
+                type="button"
+              >
+                {passwordVisible ? 'Скрыть' : 'Показать'}
+              </button>
+            </div>
+            {loginError === null ? null : (
+              <p className="admin-login-error" id="admin-login-error" role="alert">
+                <Icon name="warning" size={17} />
+                <span>{loginError}</span>
+              </p>
+            )}
+            <div className="admin-login-actions">
+              <button
+                className="admin-button admin-button--primary"
+                disabled={authState === 'submitting' || password.length < 12}
+                type="submit"
+              >
+                {authState === 'submitting' ? 'Входим…' : 'Войти'}
+              </button>
+              <button className="admin-button" onClick={onExit} type="button">
+                Вернуться в Mini App
+              </button>
+            </div>
+            <small>Доступ к форме входа открывается только командой /admin в чате с ботом.</small>
+          </form>
+        ) : authState === 'checking' ? null : (
+          <div className="admin-login-actions">
+            <button
+              className="admin-button admin-button--primary"
+              onClick={() => window.location.reload()}
+              type="button"
+            >
+              Повторить
+            </button>
+            <button className="admin-button" onClick={onExit} type="button">
+              Вернуться в Mini App
+            </button>
+          </div>
         )}
       </main>
     );
@@ -357,10 +441,10 @@ export const AdminPanel = ({ initData, onExit }: AdminPanelProps) => {
             <Icon name="spark" size={19} />
           </button>
           <div className="admin-profile">
-            <span>{session.user.firstName.slice(0, 1).toUpperCase()}</span>
+            <span>А</span>
             <div>
-              <strong>{displayName(session.user)}</strong>
-              <small>Администратор</small>
+              <strong>Администратор</strong>
+              <small>Защищённая сессия</small>
             </div>
           </div>
           <button

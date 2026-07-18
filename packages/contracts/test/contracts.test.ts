@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AdminAuthRequestSchema,
   AdminAuthResponseSchema,
   AdminContentDocumentSchema,
   AdminSubmissionUpdateRequestSchema,
@@ -268,6 +269,32 @@ describe('MAX authentication and contact verification', () => {
 });
 
 describe('admin contracts', () => {
+  it('accepts only a bounded password together with MAX launch proof', () => {
+    expect(
+      AdminAuthRequestSchema.safeParse({
+        initData: 'signed-init-data',
+        password: 'long-admin-password',
+      }).success,
+    ).toBe(true);
+    expect(
+      AdminAuthRequestSchema.safeParse({
+        initData: 'signed-init-data',
+        password: 'long-admin-password',
+        token: 'x',
+      }).success,
+    ).toBe(false);
+    expect(
+      AdminAuthRequestSchema.safeParse({ initData: 'signed-init-data', password: 'too-short' })
+        .success,
+    ).toBe(false);
+    expect(
+      AdminAuthRequestSchema.safeParse({
+        initData: 'signed-init-data',
+        password: 'x'.repeat(257),
+      }).success,
+    ).toBe(false);
+  });
+
   it('keeps the session credential out of the browser-readable auth response', () => {
     const response = {
       authenticated: true,

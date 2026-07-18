@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 
 import {
   AdminCaseSchema,
@@ -139,6 +139,7 @@ export class InvalidAdminCursorError extends Error {
 
 export interface PostgresAdminStoreOptions {
   readonly now?: () => Date;
+  readonly sessionTokenHashKey: Buffer;
   readonly sessionTtlSeconds: number;
 }
 
@@ -161,8 +162,8 @@ function validNow(clock: () => Date): Date {
   return now;
 }
 
-function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
+function hashToken(token: string, key: Buffer): string {
+  return createHmac('sha256', key).update(token).digest('hex');
 }
 
 function resultRows(result: unknown): readonly UnknownRow[] {
@@ -421,14 +422,19 @@ function isUniqueViolation(error: unknown): boolean {
 export class PostgresAdminStore implements AdminStore {
   readonly #database: Database;
   readonly #now: () => Date;
+  readonly #sessionTokenHashKey: Buffer;
   readonly #sessionTtlSeconds: number;
 
   public constructor(database: Database, options: PostgresAdminStoreOptions) {
     if (!Number.isSafeInteger(options.sessionTtlSeconds) || options.sessionTtlSeconds <= 0) {
       throw new RangeError('Admin session TTL must be a positive integer');
     }
+    if (options.sessionTokenHashKey.length < 32) {
+      throw new RangeError('Admin session token hash key must contain at least 32 bytes');
+    }
     this.#database = database;
     this.#now = options.now ?? (() => new Date());
+    this.#sessionTokenHashKey = Buffer.from(options.sessionTokenHashKey);
     this.#sessionTtlSeconds = options.sessionTtlSeconds;
   }
 
@@ -469,7 +475,7 @@ export class PostgresAdminStore implements AdminStore {
       const [session] = await transaction
         .insert(adminSessions)
         .values({
-          tokenHash: hashToken(token),
+          tokenHash: hashToken(token, this.#sessionTokenHashKey),
           maxUserId: BigInt(user.id),
           expiresAt,
           createdAt: now,
@@ -499,7 +505,7 @@ export class PostgresAdminStore implements AdminStore {
       .innerJoin(maxUsers, eq(maxUsers.maxUserId, adminSessions.maxUserId))
       .where(
         and(
-          eq(adminSessions.tokenHash, hashToken(token)),
+          eq(adminSessions.tokenHash, hashToken(token, this.#sessionTokenHashKey)),
           isNull(adminSessions.revokedAt),
           gt(adminSessions.expiresAt, now),
         ),
@@ -527,7 +533,7 @@ export class PostgresAdminStore implements AdminStore {
         .where(
           and(
             eq(adminSessions.id, admin.sessionId),
-            eq(adminSessions.tokenHash, hashToken(token)),
+            eq(adminSessions.tokenHash, hashToken(token, this.#sessionTokenHashKey)),
             isNull(adminSessions.revokedAt),
           ),
         );

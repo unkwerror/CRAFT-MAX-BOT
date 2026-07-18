@@ -39,7 +39,7 @@ MAX_MANAGER_PROFILE_URL=https://max.ru/u/<COPIED_MANAGER_PROFILE_TOKEN>
 MAX_MANAGER_USER_ID=61096226
 MAX_MANAGER_DISPLAY_NAME='Иван Иванов'
 MAX_MANAGER_PHONE=+79220063645
-ADMIN_MAX_USER_IDS=61096226
+ADMIN_PASSWORD_SCRYPT_HASH='scrypt-v1$<16_BYTE_BASE64URL_SALT>$<32_BYTE_BASE64URL_DIGEST>'
 ADMIN_SESSION_TTL_SECONDS=28800
 SUBMISSION_RETENTION_DAYS=1095
 LOG_RETENTION_DAYS=90
@@ -81,16 +81,23 @@ TRACKER_RETRY_BASE_MS=1000
 TRACKER_RETRY_MAX_MS=300000
 ```
 
-The same file contains `DATABASE_URL`, `MAX_BOT_TOKEN`, `MAX_WEBHOOK_SECRET`, `TRACKER_TOKEN`,
-`TRACKER_ORG_ID` and a random `UPLOAD_SIGNING_SECRET` of at least 32 URL-safe characters. None of
-those values belong in `VITE_*`, a release archive, Git or deployment logs. Keep mode `600`.
+The same file contains `DATABASE_URL`, `MAX_BOT_TOKEN`, `MAX_WEBHOOK_SECRET`,
+`ADMIN_PASSWORD_SCRYPT_HASH`, `TRACKER_TOKEN`, `TRACKER_ORG_ID` and a random
+`UPLOAD_SIGNING_SECRET` of at least 32 URL-safe characters. None of those values belong in `VITE_*`,
+a release archive, Git or deployment logs. Keep mode `600`.
 
-`ADMIN_MAX_USER_IDS` is a comma-separated allowlist of signed MAX user IDs. Production startup
-fails when it is empty; changing it takes effect for every admin request, including existing
-sessions. Do not expose a separate browser token: the API issues a hashed server session through a
-`Secure`, `HttpOnly`, `SameSite=Strict` cookie with the bounded `ADMIN_SESSION_TTL_SECONDS` TTL.
-The deployment script validates this allowlist before building or applying migrations, so a missing,
-duplicated or malformed administrator ID cannot leave the new services unable to start.
+Generate `ADMIN_PASSWORD_SCRYPT_HASH` out of band from a password of at least 12 characters and
+store only the encoded `scrypt-v1` verifier. Never put the plaintext password in `.env`, shell
+history, Git or logs. The value must be single-quoted in `.env` because its two `$` separators must
+remain literal. The deployment validates the verifier remotely without printing or copying it into
+the Mini App build. Changing the verifier and restarting the API invalidates all existing admin
+sessions. The API issues a server session through a `Secure`, `HttpOnly`, `SameSite=Strict` cookie
+with the bounded `ADMIN_SESSION_TTL_SECONDS` TTL and limits password login to five attempts per IP
+in 15 minutes.
+
+New login sessions additionally require fresh signed MAX launch data with `start_param=admin` from
+the bot command. MAX identity is recorded for audit attribution but is not used as an administrator
+allowlist; possession of the configured password is the authorization decision.
 Apply `0005_admin_foundation.sql` before exposing the admin routes, and verify the migration backup
 before activation; its development rollback refuses to discard any admin-managed data.
 

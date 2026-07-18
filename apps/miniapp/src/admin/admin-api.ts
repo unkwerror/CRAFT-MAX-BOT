@@ -118,9 +118,9 @@ const sendWithoutResponse = async (path: string, init: RequestInit): Promise<voi
 const jsonBody = (value: unknown): string => JSON.stringify(value);
 
 export const adminApi = {
-  authenticate: async (initData: string): Promise<AdminAuthResponse> => {
-    const body = AdminAuthRequestSchema.parse({ initData });
-    return request('/api/admin/auth/max', AdminAuthResponseSchema, {
+  authenticate: async (initData: string, password: string): Promise<AdminAuthResponse> => {
+    const body = AdminAuthRequestSchema.parse({ initData, password });
+    return request('/api/admin/auth/password', AdminAuthResponseSchema, {
       body: jsonBody(body),
       method: 'POST',
     });

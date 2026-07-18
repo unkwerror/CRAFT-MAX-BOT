@@ -54,14 +54,12 @@ function answerCallbackAction(action: BotAnswerCallbackAction): PlannedOutboundA
 export function processWebhook(
   claim: ClaimedWebhook,
   webApp: string,
-  adminMaxUserIds: readonly string[] = [],
   welcomeText?: string,
   managerUserId?: string,
   managerDisplayName?: string,
 ): WebhookProcessingResult {
   const update = parseMaxUpdate(claim.payload);
   const plan = planBotActions(update, {
-    adminMaxUserIds,
     ...(managerDisplayName === undefined ? {} : { managerDisplayName }),
     ...(managerUserId === undefined ? {} : { managerUserId }),
     webApp,

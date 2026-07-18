@@ -26,7 +26,8 @@ const validEnvironment = {
   MAX_API_TIMEOUT_MS: '10000',
   MAX_INIT_DATA_MAX_AGE_SECONDS: '3600',
   MAX_CONTACT_MAX_AGE_SECONDS: '300',
-  ADMIN_MAX_USER_IDS: '61096226,9223372036854775807',
+  ADMIN_PASSWORD_SCRYPT_HASH:
+    'scrypt-v1$MDEyMzQ1Njc4OWFiY2RlZg$9rcVF-DZ8uU77qz3H_v29-n2g8c877AOCRXSQvC_fs0',
   ADMIN_SESSION_TTL_SECONDS: '28800',
   BOT_WORKER_POLL_INTERVAL_MS: '500',
   BOT_WORKER_LEASE_SECONDS: '60',
@@ -109,7 +110,9 @@ describe('parseServerEnvironment', () => {
     expect(environment.SESSION_TTL_SECONDS).toBe(3_600);
     expect(environment.DRAFT_TTL_SECONDS).toBe(2_592_000);
     expect(environment.SUBMISSION_RETENTION_DAYS).toBe(1_095);
-    expect(environment.ADMIN_MAX_USER_IDS).toEqual(['61096226', '9223372036854775807']);
+    expect(environment.ADMIN_PASSWORD_SCRYPT_HASH).toBe(
+      validEnvironment.ADMIN_PASSWORD_SCRYPT_HASH,
+    );
     expect(environment.ADMIN_SESSION_TTL_SECONDS).toBe(28_800);
     expect(environment.MAX_MANAGER_PROFILE_URL).toBe('https://max.ru/u/Manager_token-123');
     expect(environment.MAX_MANAGER_DISPLAY_NAME).toBe('Иван Иванов');
@@ -123,11 +126,16 @@ describe('parseServerEnvironment', () => {
     }
   });
 
-  it('requires a unique MAX admin allowlist in production', () => {
-    for (const ADMIN_MAX_USER_IDS of ['', '0', '61096226,61096226', '9223372036854775808']) {
-      expect(() => parseServerEnvironment({ ...validEnvironment, ADMIN_MAX_USER_IDS })).toThrow(
-        ConfigurationError,
-      );
+  it('requires a concrete supported admin password hash', () => {
+    for (const ADMIN_PASSWORD_SCRYPT_HASH of [
+      '',
+      'plaintext-password',
+      '<GENERATED_SCRYPT_HASH>',
+      'scrypt-v1$short$short',
+    ]) {
+      expect(() =>
+        parseServerEnvironment({ ...validEnvironment, ADMIN_PASSWORD_SCRYPT_HASH }),
+      ).toThrow(ConfigurationError);
     }
   });
 
@@ -264,6 +272,7 @@ describe('parseServerEnvironment', () => {
       DATABASE_URL: 'postgresql://<PRIVATE_USER>:<PRIVATE_PASSWORD>@127.0.0.1:5432/craft72_max_app',
       MAX_BOT_TOKEN: '<VERY_SENSITIVE_MAX_TOKEN>',
       MAX_WEBHOOK_SECRET: '<VERY_SENSITIVE_WEBHOOK_SECRET>',
+      ADMIN_PASSWORD_SCRYPT_HASH: '<VERY_SENSITIVE_ADMIN_PASSWORD_HASH>',
       TRACKER_TOKEN: '<VERY_SENSITIVE_TRACKER_TOKEN>',
     } as const;
 

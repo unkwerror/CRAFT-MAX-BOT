@@ -21,7 +21,6 @@ export type WorkerLogger = (
 ) => void;
 
 export interface BotWorkerOptions extends RetryPolicy {
-  readonly adminMaxUserIds?: readonly string[];
   readonly leaseSeconds: number;
   readonly maxAttempts: number;
   readonly maxApi: MaxApiClient;
@@ -154,7 +153,6 @@ export async function runWorkerCycle(
       const result = processWebhook(
         webhook,
         options.webApp,
-        options.adminMaxUserIds,
         welcomeText,
         options.managerUserId,
         options.managerDisplayName,

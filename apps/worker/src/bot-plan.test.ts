@@ -75,27 +75,48 @@ describe('planBotActions', () => {
     }
   });
 
-  it('adds the admin entry only for an exactly allowlisted MAX actor', () => {
-    const adminPlan = planBotActions(lifecycle('bot_started'), {
-      adminMaxUserIds: ['123456789'],
-      webApp: WEB_APP,
-    });
-    const nonAdminPlan = planBotActions(lifecycle('bot_started'), {
-      adminMaxUserIds: ['987654321'],
-      webApp: WEB_APP,
-    });
-    const malformedIdPlan = planBotActions(lifecycle('bot_started'), {
-      adminMaxUserIds: ['0123456789'],
-      webApp: WEB_APP,
-    });
+  it.each(['/admin', '/ADMIN', '/admin@craft72_bot', '/ADMIN@CRAFT72_BOT'])(
+    'reveals the password-protected admin entry only for the exact command %s',
+    (command) => {
+      const actions = planBotActions(message(command), { webApp: WEB_APP });
 
-    expect(JSON.stringify(adminPlan)).toContain(
-      '{"payload":"admin","text":"Админ-панель","type":"open_app","web_app":"craft72_bot"}',
-    );
-    expect(JSON.stringify(adminPlan)).toContain('"payload":"admin"');
-    expect(JSON.stringify(nonAdminPlan)).not.toContain('"payload":"admin"');
-    expect(JSON.stringify(malformedIdPlan)).not.toContain('"payload":"admin"');
-  });
+      expect(actions.map(({ kind }) => kind)).toEqual(['set_dialog_state', 'send_message']);
+      expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(false);
+      expect(actions[1]).toMatchObject({
+        body: {
+          text: expect.stringContaining('защищена отдельным паролем'),
+          attachments: [
+            {
+              payload: {
+                buttons: [
+                  [
+                    {
+                      payload: 'admin',
+                      text: 'Открыть админ-панель',
+                      type: 'open_app',
+                      web_app: WEB_APP,
+                    },
+                  ],
+                ],
+              },
+              type: 'inline_keyboard',
+            },
+          ],
+        },
+        kind: 'send_message',
+      });
+    },
+  );
+
+  it.each(['/administrator', '/admin now', '/admin@other_bot'])(
+    'does not reveal or store a malformed or foreign admin command %s',
+    (command) => {
+      const actions = planBotActions(message(command), { webApp: WEB_APP });
+
+      expect(JSON.stringify(actions)).not.toContain('"payload":"admin"');
+      expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(false);
+    },
+  );
 
   it('welcomes bot_started and /start with a shared short-window idempotency key', () => {
     const started = planBotActions(lifecycle('bot_started'), { webApp: WEB_APP });
@@ -195,9 +216,8 @@ describe('planBotActions', () => {
     expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(false);
   });
 
-  it('applies a validated welcome override without changing the home/admin keyboard payloads', () => {
+  it('applies a validated welcome override without exposing the admin payload', () => {
     const actions = planBotActions(lifecycle('bot_started'), {
-      adminMaxUserIds: ['123456789'],
       webApp: WEB_APP,
       welcomeText: '  Новое приветствие  ',
     });
@@ -205,7 +225,7 @@ describe('planBotActions', () => {
 
     expect(send).toMatchObject({ body: { text: 'Новое приветствие' } });
     expect(JSON.stringify(send)).toContain('"payload":"home"');
-    expect(JSON.stringify(send)).toContain('"payload":"admin"');
+    expect(JSON.stringify(send)).not.toContain('"payload":"admin"');
   });
 
   it.each(['', '   ', 'x'.repeat(4_001)])(
@@ -270,6 +290,7 @@ describe('planBotActions', () => {
 
   it('filters bot-authored messages and marks bot_stopped without sending', () => {
     expect(planBotActions(message('echo', true), { webApp: WEB_APP })).toEqual([]);
+    expect(planBotActions(message('/admin', true), { webApp: WEB_APP })).toEqual([]);
     expect(planBotActions(lifecycle('bot_stopped'), { webApp: WEB_APP })).toEqual([
       expect.objectContaining({ active: false, chatId: '182182182', kind: 'set_dialog_state' }),
     ]);
