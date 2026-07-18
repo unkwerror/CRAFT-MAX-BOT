@@ -254,7 +254,7 @@ describe('App Stage 3 runtime', () => {
     await waitFor(() => expect(webApp.openLink).toHaveBeenCalledWith(downloadUrl));
   });
 
-  it('opens the configured manager profile before native-id and phone fallbacks', async () => {
+  it('opens the configured manager profile before the phone fallback', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
     vi.stubEnv('VITE_MAX_MANAGER_PROFILE_URL', 'https://max.ru/u/Manager_token-123');
@@ -294,7 +294,7 @@ describe('App Stage 3 runtime', () => {
     expect(screen.getByText(/Профиль менеджера в MAX временно недоступен/)).toBeTruthy();
   });
 
-  it('uses the native MAX user profile before the configured phone fallback', async () => {
+  it('does not treat a numeric MAX ID as a profile URL and uses the phone fallback', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_MAX_BOT_URL', 'https://max.ru/se13560957_bot');
     vi.stubEnv('VITE_MAX_MANAGER_PROFILE_URL', '');
@@ -310,8 +310,8 @@ describe('App Stage 3 runtime', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /менеджер/i }));
 
-    expect(webApp.openMaxLink).toHaveBeenCalledWith('max://user/61096226');
-    expect(browserOpen).not.toHaveBeenCalled();
+    expect(webApp.openMaxLink).not.toHaveBeenCalled();
+    expect(browserOpen).toHaveBeenCalledWith('tel:+79220063645', '_blank', 'noopener,noreferrer');
     expect(webApp.close).not.toHaveBeenCalled();
   });
 

@@ -416,7 +416,7 @@ test('all primary screens remain usable across viewport, theme and reduced-motio
   }
 });
 
-test('manager CTA sends a profile deep-link to MAX Bridge before any phone fallback', async ({
+test('manager CTA uses only a supported MAX profile link or an explicit phone fallback', async ({
   browser,
 }, testInfo) => {
   test.skip(
@@ -436,14 +436,15 @@ test('manager CTA sends a profile deep-link to MAX Bridge before any phone fallb
     const state = await page.evaluate(
       () => (window as unknown as { readonly __maxE2e: MaxMockState }).__maxE2e,
     );
-    expect(state.browserOpenUrls.filter((url) => url.startsWith('tel:'))).toEqual([]);
-    expect(state.maxLinks).toHaveLength(1);
-
-    const managerLink = state.maxLinks[0] ?? '';
-    const isConfiguredProfile = /^https:\/\/max\.ru\/u\/[^/?#\s]+$/.test(managerLink);
-    const isNativeFallback = managerLink === 'max://user/61096226';
-    expect(isConfiguredProfile || isNativeFallback, managerLink).toBe(true);
-    expect(managerLink).not.toMatch(/_bot(?:[/?#]|$)/i);
+    expect(state.maxLinks.every((url) => url.startsWith('https://max.ru/'))).toBe(true);
+    expect(state.maxLinks.every((url) => !url.startsWith('max://'))).toBe(true);
+    if (state.maxLinks.length === 0) {
+      expect(state.browserOpenUrls).toContain('tel:+79220063645');
+    } else {
+      expect(state.maxLinks).toHaveLength(1);
+      expect(state.browserOpenUrls.filter((url) => url.startsWith('tel:'))).toEqual([]);
+      expect(state.maxLinks[0]).not.toMatch(/_bot(?:[/?#]|$)/i);
+    }
   } finally {
     await context.close();
   }

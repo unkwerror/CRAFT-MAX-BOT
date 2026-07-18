@@ -85,6 +85,7 @@ const MANAGER_HANDOFF_TEXT =
   'Напишите задачу одним сообщением — менеджер КРАФТ получит обращение. ' +
   'Или откройте мини-приложение, чтобы заполнить анкету и приложить материалы.';
 const START_COMMAND_PATTERN = /^\/start(?:@[A-Za-z0-9_]+)?(?:\s|$)/i;
+const ID_COMMAND_PATTERN = /^\/id(?:@[A-Za-z0-9_]+)?$/i;
 const WELCOME_DEDUPLICATION_WINDOW_MS = 5 * 60 * 1_000;
 const MAX_MESSAGE_TEXT_LENGTH = 4_000;
 
@@ -251,6 +252,15 @@ export function planBotActions(
         'welcome',
         welcomeActionKey(update),
       ),
+    ]);
+  }
+
+  if (ID_COMMAND_PATTERN.test(text)) {
+    return compact([
+      dialogAction(update, true),
+      update.actorUserId === null
+        ? null
+        : sendAction(update, { text: `Ваш MAX ID: ${update.actorUserId}` }, 'show_max_id'),
     ]);
   }
 

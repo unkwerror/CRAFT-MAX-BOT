@@ -609,22 +609,11 @@ export const App = () => {
   );
 
   const handleOpenManagerChat = useCallback((): void => {
-    // Prefer an explicit public profile, then the native user-id link, and only then the phone.
+    // MAX Bridge accepts only canonical https://max.ru links. A numeric user ID is not a profile URL.
     try {
       if (
         maxBotConfiguration.managerProfileUrl !== null &&
         maxBridge.openMaxLink(maxBotConfiguration.managerProfileUrl)
-      ) {
-        return;
-      }
-    } catch {
-      // Continue to the native MAX user link.
-    }
-
-    try {
-      if (
-        maxBotConfiguration.managerUserId !== null &&
-        maxBridge.openMaxUserProfile(maxBotConfiguration.managerUserId)
       ) {
         return;
       }

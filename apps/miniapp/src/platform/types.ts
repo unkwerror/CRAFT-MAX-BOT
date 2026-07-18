@@ -98,8 +98,6 @@ export interface MaxBridgeAdapter {
   requestContact(): Promise<MaxContactData>;
   openLink(url: string): boolean;
   openMaxLink(url: string): boolean;
-  /** Opens a MAX user profile through the injected native Bridge only. */
-  openMaxUserProfile(userId: string): boolean;
   /**
    * Opens a phone dialer for an E.164 number (e.g. +79220063645).
    * Uses a tel: URI — not allowed through openLink HTTPS guards.

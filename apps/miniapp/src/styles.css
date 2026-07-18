@@ -1115,6 +1115,11 @@ textarea:focus-visible {
   caret-color: var(--app-primary);
 }
 
+.field input:focus-visible,
+.field textarea:focus-visible {
+  outline: 0;
+}
+
 .field > [class*='Input'],
 .field > [class*='Textarea'] {
   min-height: 52px;

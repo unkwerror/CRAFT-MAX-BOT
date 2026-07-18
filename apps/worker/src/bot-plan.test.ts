@@ -111,6 +111,39 @@ describe('planBotActions', () => {
     });
   });
 
+  it.each(['/id', '/id@craft72_bot'])(
+    'answers %s with the current actor MAX ID without creating an inquiry',
+    (command) => {
+      const actions = planBotActions(message(command), { webApp: WEB_APP });
+
+      expect(actions.map(({ kind }) => kind)).toEqual(['set_dialog_state', 'send_message']);
+      expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(false);
+      expect(actions[1]).toMatchObject({
+        body: { text: 'Ваш MAX ID: 123456789' },
+        chatId: '182182182',
+        kind: 'send_message',
+      });
+      expect(
+        (actions[1] as { body?: { attachments?: unknown } }).body?.attachments,
+      ).toBeUndefined();
+    },
+  );
+
+  it('does not store an ID command when MAX omits the actor ID', () => {
+    const update = parseMaxUpdate({
+      message: {
+        recipient: { chat_id: 182_182_182 },
+        body: { mid: 'mid.id-without-actor', text: '/id' },
+      },
+      timestamp: 1_775_025_604_501,
+      update_type: 'message_created',
+    });
+    const actions = planBotActions(update, { webApp: WEB_APP });
+
+    expect(actions.map(({ kind }) => kind)).toEqual(['set_dialog_state']);
+    expect(actions.some(({ kind }) => kind === 'save_inquiry')).toBe(false);
+  });
+
   it('applies a validated welcome override without changing the home/admin keyboard payloads', () => {
     const actions = planBotActions(lifecycle('bot_started'), {
       adminMaxUserIds: ['123456789'],

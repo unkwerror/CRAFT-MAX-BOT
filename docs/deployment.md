@@ -95,7 +95,8 @@ before activation; its development rollback refuses to discard any admin-managed
 
 `MAX_MANAGER_PROFILE_URL` must be the exact personal link copied from the manager's MAX profile;
 it cannot be derived from the numeric user ID. The Mini App prefers this HTTPS link, then uses the
-native `max://user/<id>` bridge link and finally the configured phone as a fallback.
+configured phone as a fallback. MAX Bridge does not support `max://user/<id>` as a Mini App
+navigation URL.
 
 ### Install and verify ClamAV
 
