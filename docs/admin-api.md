@@ -7,12 +7,14 @@ scrypt verifier is stored in `ADMIN_PASSWORD_SCRYPT_HASH`. The signed profile is
 the audit identity for the resulting session.
 
 The login route is limited to five attempts per source IP in 15 minutes. A successful login stores
-only an HMAC-SHA-256 digest of a random 32-byte session credential and returns the credential in the
-`__Host-craft72-admin` cookie. The HMAC key is derived from the configured password verifier, so a
-password rotation also invalidates every existing session. Neither password nor session credential
-is included in JSON or browser storage. Mutating requests require the exact production `Origin`;
-the cookie is `Secure`, `HttpOnly`, `SameSite=None`, `Partitioned`, host-only and bounded by
-`ADMIN_SESSION_TTL_SECONDS`.
+only an HMAC-SHA-256 digest of a random 32-byte session credential. It returns the credential once
+in the password-auth response for MAX mobile WebViews that do not retain cookies, and also sets the
+`__Host-craft72-admin` cookie where supported. The Mini App keeps the response credential only in
+runtime memory and sends it as a Bearer token; it is never written to persistent browser storage.
+The HMAC key is derived from the configured password verifier, so a password rotation invalidates
+every existing session. The password is never returned or stored client-side. Mutating requests
+require the exact production `Origin`; the cookie is `Secure`, `HttpOnly`, `SameSite=None`,
+`Partitioned`, host-only and bounded by `ADMIN_SESSION_TTL_SECONDS`.
 
 The initial API surface is:
 

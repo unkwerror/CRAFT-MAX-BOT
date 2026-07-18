@@ -175,6 +175,7 @@ describe('AdminPanel password authentication', () => {
           photoUrl: null,
         },
         expiresAt: '2026-07-18T16:00:00.000Z',
+        sessionToken: 'A'.repeat(43),
       });
     vi.spyOn(adminApi, 'listUsers').mockResolvedValue({ items: [], nextCursor: null });
     vi.spyOn(adminApi, 'listSubmissions').mockResolvedValue({ items: [], nextCursor: null });

@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 
 const ADMIN_INIT_DATA =
   'query_id=admin-e2e&auth_date=1784332800&start_param=admin&hash=server-validated';
+const ADMIN_SESSION_TOKEN = 'A'.repeat(43);
 const ADMIN_SUBMISSION = {
   submissionId: 'CRAFT72-000001',
   maxUserId: '70000001',
@@ -107,23 +108,28 @@ async function adminApiRoute(route: Route): Promise<void> {
         photoUrl: null,
       },
       expiresAt: '2026-07-18T16:00:00.000Z',
+      sessionToken: ADMIN_SESSION_TOKEN,
     });
     return;
   }
   if (url.pathname.endsWith('/contact-handoff')) {
     expect(request.method()).toBe('POST');
+    expect(request.headers().authorization).toBe(`Bearer ${ADMIN_SESSION_TOKEN}`);
     await json({ queued: true }, 202);
     return;
   }
   if (url.pathname === '/api/admin/users') {
+    expect(request.headers().authorization).toBe(`Bearer ${ADMIN_SESSION_TOKEN}`);
     await json({ items: [], nextCursor: null });
     return;
   }
   if (url.pathname === '/api/admin/submissions') {
+    expect(request.headers().authorization).toBe(`Bearer ${ADMIN_SESSION_TOKEN}`);
     await json({ items: [ADMIN_SUBMISSION], nextCursor: null });
     return;
   }
   if (url.pathname === '/api/admin/cases' || url.pathname === '/api/admin/content') {
+    expect(request.headers().authorization).toBe(`Bearer ${ADMIN_SESSION_TOKEN}`);
     await json({ items: [] });
     return;
   }

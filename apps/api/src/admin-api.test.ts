@@ -169,6 +169,7 @@ class StageStoreStub implements Stage3Store {
 class MemoryAdminStore implements AdminStore {
   public readonly createSessionSpy = vi.fn();
   public readonly queueContactHandoffSpy = vi.fn();
+  public readonly revokeSessionSpy = vi.fn();
   public readonly updateSubmissionSpy = vi.fn();
   public active = false;
   public contactHandoffError: Error | null = null;
@@ -203,7 +204,12 @@ class MemoryAdminStore implements AdminStore {
       expiresAt: EXPIRES,
     };
   }
-  public async revokeSession(): Promise<void> {
+  public async revokeSession(
+    token: string,
+    admin: AuthenticatedAdmin,
+    requestId: string,
+  ): Promise<void> {
+    this.revokeSessionSpy(token, admin, requestId);
     this.active = false;
   }
   public async listUsers(_query: AdminUserListQuery): Promise<AdminPage<AdminUserListItem>> {
@@ -387,7 +393,7 @@ describe('admin API foundation', () => {
     await app.close();
   });
 
-  it('creates only a host-only HttpOnly session usable from the embedded MAX WebView', async () => {
+  it('returns a bearer fallback and also creates a host-only HttpOnly session', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/admin/auth/password',
@@ -396,8 +402,9 @@ describe('admin API foundation', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(AdminAuthResponseSchema.parse(response.json()).user.id).toBe(ADMIN_ID);
-    expect(response.body).not.toContain(TOKEN);
+    const authenticated = AdminAuthResponseSchema.parse(response.json());
+    expect(authenticated.user.id).toBe(ADMIN_ID);
+    expect(authenticated.sessionToken).toBe(TOKEN);
     expect(response.body).not.toContain(PASSWORD);
     expect(response.headers['set-cookie']).toContain(`${ADMIN_SESSION_COOKIE}=${TOKEN}`);
     expect(response.headers['set-cookie']).toContain('Secure');
@@ -414,6 +421,51 @@ describe('admin API foundation', () => {
     });
     expect(anotherProfile.statusCode).toBe(200);
     expect(AdminAuthResponseSchema.parse(anotherProfile.json()).user.id).toBe('61096227');
+  });
+
+  it('uses a bearer session to list every submission even when a stale cookie remains', async () => {
+    store.active = true;
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/admin/submissions?limit=100',
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        cookie: `${ADMIN_SESSION_COOKIE}=${'B'.repeat(43)}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ items: [submission], nextCursor: null });
+  });
+
+  it('rejects invalid or duplicate Authorization instead of falling back to a valid cookie', async () => {
+    store.active = true;
+    const cookie = `${ADMIN_SESSION_COOKIE}=${TOKEN}`;
+    const responses = await Promise.all([
+      app.inject({
+        method: 'GET',
+        url: '/api/admin/submissions?limit=25',
+        headers: { authorization: `Bearer ${'B'.repeat(43)}`, cookie },
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/api/admin/submissions?limit=25',
+        headers: { authorization: 'Bearer malformed', cookie },
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/api/admin/submissions?limit=25',
+        headers: {
+          authorization: [`Bearer ${TOKEN}`, `Bearer ${TOKEN}`],
+          cookie,
+        } as unknown as Record<string, string>,
+      }),
+    ]);
+
+    expect(responses.map(({ statusCode }) => statusCode)).toEqual([401, 401, 401]);
+    for (const response of responses) {
+      expect(ApiErrorResponseSchema.parse(response.json()).error.code).toBe('UNAUTHORIZED');
+    }
   });
 
   it('returns one credential error for wrong password, launch payload and MAX proof', async () => {
@@ -576,6 +628,27 @@ describe('admin API foundation', () => {
     expect(response.headers['set-cookie']).toContain('SameSite=None');
     expect(response.headers['set-cookie']).toContain('Partitioned');
     expect(response.headers['set-cookie']).not.toContain('Domain=');
+  });
+
+  it('revokes the bearer session on logout', async () => {
+    store.active = true;
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/admin/logout',
+      headers: { authorization: `Bearer ${TOKEN}`, origin: ORIGIN },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(store.revokeSessionSpy).toHaveBeenCalledOnce();
+    expect(store.revokeSessionSpy.mock.calls[0]?.[0]).toBe(TOKEN);
+    expect(response.headers['set-cookie']).toContain('Max-Age=0');
+
+    const afterLogout = await app.inject({
+      method: 'GET',
+      url: '/api/admin/submissions?limit=25',
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(afterLogout.statusCode).toBe(401);
   });
 
   it('returns bot-only identities through the same protected users endpoint', async () => {

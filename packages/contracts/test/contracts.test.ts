@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AdminAuthRequestSchema,
   AdminAuthResponseSchema,
+  AdminSessionResponseSchema,
   AdminContactHandoffResponseSchema,
   AdminContentDocumentSchema,
   AdminSubmissionUpdateRequestSchema,
@@ -304,7 +305,7 @@ describe('admin contracts', () => {
     ).toBe(false);
   });
 
-  it('keeps the session credential out of the browser-readable auth response', () => {
+  it('returns the session credential only from password authentication', () => {
     const response = {
       authenticated: true,
       user: {
@@ -316,12 +317,19 @@ describe('admin contracts', () => {
         photoUrl: null,
       },
       expiresAt: LATER,
+      sessionToken: SESSION_TOKEN,
     } as const;
 
     expect(AdminAuthResponseSchema.safeParse(response).success).toBe(true);
-    expect(AdminAuthResponseSchema.safeParse({ ...response, token: SESSION_TOKEN }).success).toBe(
+    expect(
+      AdminAuthResponseSchema.safeParse({ ...response, sessionToken: undefined }).success,
+    ).toBe(false);
+    expect(AdminAuthResponseSchema.safeParse({ ...response, password: 'secret' }).success).toBe(
       false,
     );
+    expect(AdminSessionResponseSchema.safeParse(response).success).toBe(false);
+    const { sessionToken: _sessionToken, ...sessionResponse } = response;
+    expect(AdminSessionResponseSchema.safeParse(sessionResponse).success).toBe(true);
   });
 
   it('allows only review metadata to change on an immutable submitted intake', () => {

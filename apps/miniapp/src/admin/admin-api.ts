@@ -48,6 +48,35 @@ export class AdminApiError extends Error {
   }
 }
 
+let inMemorySessionToken: string | null = null;
+
+const isSessionToken = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.length >= 20 &&
+  value.length <= 512 &&
+  /^[A-Za-z0-9._~-]+$/.test(value);
+
+const readSessionToken = (): string | null => {
+  return inMemorySessionToken;
+};
+
+const storeSessionToken = (token: string): void => {
+  inMemorySessionToken = isSessionToken(token) ? token : null;
+};
+
+const clearSessionToken = (): void => {
+  inMemorySessionToken = null;
+};
+
+const adminRequestHeaders = (init: RequestInit): Headers => {
+  const headers = new Headers(init.headers);
+  headers.set('accept', 'application/json');
+  if (init.body !== undefined) headers.set('content-type', 'application/json');
+  const token = readSessionToken();
+  if (token !== null) headers.set('authorization', `Bearer ${token}`);
+  return headers;
+};
+
 const parseBody = async (response: Response): Promise<unknown> => {
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) return null;
@@ -63,17 +92,12 @@ const request = async <T>(
   schema: RuntimeSchema<T>,
   init: RequestInit = {},
 ): Promise<T> => {
-  const hasBody = init.body !== undefined;
   let response: Response;
   try {
     response = await fetch(path, {
       ...init,
       credentials: 'include',
-      headers: {
-        accept: 'application/json',
-        ...(hasBody ? { 'content-type': 'application/json' } : {}),
-        ...init.headers,
-      },
+      headers: adminRequestHeaders(init),
     });
   } catch {
     throw new AdminApiError(0, 'NETWORK_ERROR');
@@ -81,6 +105,7 @@ const request = async <T>(
 
   const body = await parseBody(response);
   if (!response.ok) {
+    if (response.status === 401 && path !== '/api/admin/auth/password') clearSessionToken();
     const parsed = ApiErrorResponseSchema.safeParse(body);
     throw new AdminApiError(
       response.status,
@@ -99,16 +124,13 @@ const sendWithoutResponse = async (path: string, init: RequestInit): Promise<voi
     response = await fetch(path, {
       ...init,
       credentials: 'include',
-      headers: {
-        accept: 'application/json',
-        ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...init.headers,
-      },
+      headers: adminRequestHeaders(init),
     });
   } catch {
     throw new AdminApiError(0, 'NETWORK_ERROR');
   }
   if (response.ok) return;
+  if (response.status === 401) clearSessionToken();
   const parsed = ApiErrorResponseSchema.safeParse(await parseBody(response));
   throw new AdminApiError(
     response.status,
@@ -121,16 +143,30 @@ const jsonBody = (value: unknown): string => JSON.stringify(value);
 export const adminApi = {
   authenticate: async (initData: string, password: string): Promise<AdminAuthResponse> => {
     const body = AdminAuthRequestSchema.parse({ initData, password });
-    return request('/api/admin/auth/password', AdminAuthResponseSchema, {
+    const authenticated = await request('/api/admin/auth/password', AdminAuthResponseSchema, {
       body: jsonBody(body),
       method: 'POST',
     });
+    storeSessionToken(authenticated.sessionToken);
+    return authenticated;
   },
 
-  getSession: async (): Promise<AdminSessionResponse> =>
-    request('/api/admin/session', AdminSessionResponseSchema),
+  getSession: async (): Promise<AdminSessionResponse> => {
+    try {
+      return await request('/api/admin/session', AdminSessionResponseSchema);
+    } catch (error) {
+      if (error instanceof AdminApiError && error.status === 401) clearSessionToken();
+      throw error;
+    }
+  },
 
-  logout: async (): Promise<void> => sendWithoutResponse('/api/admin/logout', { method: 'POST' }),
+  logout: async (): Promise<void> => {
+    try {
+      await sendWithoutResponse('/api/admin/logout', { method: 'POST' });
+    } finally {
+      clearSessionToken();
+    }
+  },
 
   listUsers: async (
     cursor?: string,

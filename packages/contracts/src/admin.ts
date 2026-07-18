@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { MaxUserIdSchema, MaxUserSchema } from './auth.js';
+import { MaxUserIdSchema, MaxUserSchema, SessionTokenSchema } from './auth.js';
 import { CaseIdSchema } from './case-catalog.js';
 import { LeadFormDataSchema } from './lead-draft.js';
 import {
@@ -41,15 +41,17 @@ export const AdminAuthRequestSchema = z.strictObject({
 });
 export type AdminAuthRequest = z.infer<typeof AdminAuthRequestSchema>;
 
-export const AdminAuthResponseSchema = z.strictObject({
+export const AdminSessionResponseSchema = z.strictObject({
   authenticated: z.literal(true),
   user: MaxUserSchema,
   expiresAt: IsoDateTimeSchema,
 });
-export type AdminAuthResponse = z.infer<typeof AdminAuthResponseSchema>;
-
-export const AdminSessionResponseSchema = AdminAuthResponseSchema;
 export type AdminSessionResponse = z.infer<typeof AdminSessionResponseSchema>;
+
+export const AdminAuthResponseSchema = AdminSessionResponseSchema.extend({
+  sessionToken: SessionTokenSchema,
+});
+export type AdminAuthResponse = z.infer<typeof AdminAuthResponseSchema>;
 
 export const AdminUserListQuerySchema = z.strictObject({
   cursor: CursorSchema.optional(),

@@ -94,6 +94,23 @@ function sessionTokenFromCookie(request: FastifyRequest): string | null {
   return parsed.success ? parsed.data : null;
 }
 
+function sessionTokenFromAuthorization(request: FastifyRequest): string | null | undefined {
+  const values: string[] = [];
+  const rawHeaders = request.raw.rawHeaders;
+  for (let index = 0; index < rawHeaders.length; index += 2) {
+    if (rawHeaders[index]?.toLowerCase() === 'authorization') {
+      values.push(rawHeaders[index + 1] ?? '');
+    }
+  }
+  if (values.length === 0) return undefined;
+  if (values.length !== 1) return null;
+
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/i.exec(values[0] ?? '');
+  if (match?.[1] === undefined) return null;
+  const parsed = SessionTokenSchema.safeParse(match[1]);
+  return parsed.success ? parsed.data : null;
+}
+
 function setSessionCookie(reply: FastifyReply, token: string, expiresAt: Date, now: Date): void {
   const maxAge = Math.max(1, Math.floor((expiresAt.getTime() - now.getTime()) / 1_000));
   reply.header(
@@ -168,7 +185,8 @@ export function buildAdminApiModule(options: AdminApiOptions): Stage3ApiModule {
   const authenticate = async (
     request: FastifyRequest,
   ): Promise<{ admin: AuthenticatedAdmin; token: string }> => {
-    const token = sessionTokenFromCookie(request);
+    const bearerToken = sessionTokenFromAuthorization(request);
+    const token = bearerToken === undefined ? sessionTokenFromCookie(request) : bearerToken;
     if (token === null) {
       throw new ApiHttpError(401, 'UNAUTHORIZED', 'A valid admin session is required');
     }
@@ -215,6 +233,7 @@ export function buildAdminApiModule(options: AdminApiOptions): Stage3ApiModule {
             authenticated: true,
             user: session.user,
             expiresAt: session.expiresAt.toISOString(),
+            sessionToken: session.token,
           });
         },
       );

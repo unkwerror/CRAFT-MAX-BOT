@@ -342,7 +342,11 @@ export const AdminPanel = ({ initData, onExit }: AdminPanelProps) => {
     setLoginError(null);
     try {
       const authenticated = await adminApi.authenticate(initData, submittedPassword);
-      setSession(authenticated);
+      setSession({
+        authenticated: authenticated.authenticated,
+        expiresAt: authenticated.expiresAt,
+        user: authenticated.user,
+      });
       setAuthState('ready');
     } catch (error) {
       setLoginError(loginErrorMessage(error));

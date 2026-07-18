@@ -94,7 +94,10 @@ the Mini App build. Changing the verifier and restarting the API invalidates all
 sessions. The API issues a server session through a
 `Secure`, `HttpOnly`, `SameSite=None`, `Partitioned` cookie
 with the bounded `ADMIN_SESSION_TTL_SECONDS` TTL and limits password login to five attempts per IP
-in 15 minutes.
+in 15 minutes. Because some MAX mobile WebViews do not retain cookies, the password-auth response
+also returns the random session credential once; the Mini App keeps it only in runtime memory and
+sends it as a Bearer token for the current open Mini App. It is never written to persistent browser
+storage, and the password is never returned to the client.
 
 New login sessions additionally require fresh signed MAX launch data with `start_param=admin` from
 the bot command. MAX identity is recorded for audit attribution but is not used as an administrator
